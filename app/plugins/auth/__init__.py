@@ -1,0 +1,1 @@
+"""Authentication plugins for OpenMark."""

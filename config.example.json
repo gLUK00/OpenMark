@@ -1,0 +1,40 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 5000,
+    "debug": true,
+    "secret_key": "dev-secret-key-change-in-production"
+  },
+  "cache": {
+    "directory": "./cache",
+    "duration_seconds": 3600
+  },
+  "plugins": {
+    "authentication": {
+      "type": "local",
+      "config": {
+        "users_file": "./data/users.json",
+        "token_expiry_hours": 24
+      }
+    },
+    "pdf_source": {
+      "type": "http",
+      "config": {
+        "base_url": "",
+        "local_path": "./data/pdfs",
+        "timeout": 30
+      }
+    },
+    "annotations": {
+      "type": "local",
+      "config": {
+        "storage_path": "./data/annotations.json"
+      }
+    }
+  },
+  "customization": {
+    "script_file": null,
+    "logo_url": null,
+    "primary_color": "#007bff"
+  }
+}

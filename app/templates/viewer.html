@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenMark - PDF Viewer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/viewer.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    {% if customization.primary_color %}
+    <style>
+        :root {
+            --primary-color: {{ customization.primary_color }};
+        }
+    </style>
+    {% endif %}
+</head>
+<body class="viewer-page">
+    <!-- Toolbar -->
+    <div class="viewer-toolbar">
+        <div class="toolbar-left">
+            <a href="/dashboard" class="toolbar-brand">🔖 OpenMark</a>
+            <span class="toolbar-separator"></span>
+            <span class="document-name" id="documentName">{{ document_id }}</span>
+        </div>
+        
+        <div class="toolbar-center">
+            <button class="toolbar-btn" id="prevPage" title="Previous Page">
+                ◀
+            </button>
+            <span class="page-info">
+                <input type="number" id="pageInput" min="1" value="1"> 
+                / <span id="totalPages">1</span>
+            </span>
+            <button class="toolbar-btn" id="nextPage" title="Next Page">
+                ▶
+            </button>
+            <span class="toolbar-separator"></span>
+            <button class="toolbar-btn" id="zoomOut" title="Zoom Out">−</button>
+            <span id="zoomLevel">100%</span>
+            <button class="toolbar-btn" id="zoomIn" title="Zoom In">+</button>
+        </div>
+        
+        <div class="toolbar-right">
+            <button class="toolbar-btn tool-btn" id="selectTool" title="Select" data-tool="select">
+                ↖
+            </button>
+            <button class="toolbar-btn tool-btn" id="noteTool" title="Add Note" data-tool="note">
+                📝
+            </button>
+            <button class="toolbar-btn tool-btn" id="highlightTool" title="Highlight" data-tool="highlight">
+                🖍️
+            </button>
+            <div class="color-picker" id="colorPicker">
+                <button class="color-btn" data-color="#ffff00" style="background: #ffff00" title="Yellow"></button>
+                <button class="color-btn" data-color="#90EE90" style="background: #90EE90" title="Green"></button>
+                <button class="color-btn" data-color="#FFB6C1" style="background: #FFB6C1" title="Pink"></button>
+                <button class="color-btn" data-color="#87CEEB" style="background: #87CEEB" title="Blue"></button>
+                <button class="color-btn" data-color="#FFA500" style="background: #FFA500" title="Orange"></button>
+            </div>
+            <span class="toolbar-separator"></span>
+            <button class="toolbar-btn" id="saveBtn" title="Save Annotations">
+                💾 Save
+            </button>
+        </div>
+    </div>
+    
+    <!-- Main viewer area -->
+    <div class="viewer-container">
+        <!-- Sidebar for annotations list -->
+        <div class="viewer-sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h3>Annotations</h3>
+                <button class="sidebar-toggle" id="toggleSidebar">◀</button>
+            </div>
+            <div class="sidebar-content">
+                <div class="annotation-section">
+                    <h4>📝 Notes (<span id="notesCount">0</span>)</h4>
+                    <div class="annotation-list" id="notesList"></div>
+                </div>
+                <div class="annotation-section">
+                    <h4>🖍️ Highlights (<span id="highlightsCount">0</span>)</h4>
+                    <div class="annotation-list" id="highlightsList"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- PDF Canvas Container -->
+        <div class="pdf-container" id="pdfContainer">
+            <div class="pdf-page-wrapper" id="pageWrapper">
+                <canvas id="pdfCanvas"></canvas>
+                <div class="annotations-layer" id="annotationsLayer"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Note Editor Modal -->
+    <div class="modal" id="noteModal" style="display: none;">
+        <div class="modal-content note-editor">
+            <div class="note-header" id="noteHeader">
+                <span>Note</span>
+                <button class="close-btn" id="closeNoteModal">×</button>
+            </div>
+            <textarea id="noteContent" placeholder="Enter your note..."></textarea>
+            <div class="note-footer">
+                <button class="btn btn-danger" id="deleteNote" style="display: none;">Delete</button>
+                <button class="btn btn-primary" id="saveNote">Save</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Toast notification -->
+    <div class="toast" id="toast" style="display: none;"></div>
+    
+    <script>
+        // Pass data from server to JavaScript
+        window.OPENMARK = {
+            tempDocumentId: "{{ temp_doc_id }}",
+            documentId: "{{ document_id }}",
+            token: "{{ token }}",
+            pdfUrl: "/pdf/{{ temp_doc_id }}?token={{ token }}"
+        };
+    </script>
+    <script src="{{ url_for('static', filename='js/viewer.js') }}"></script>
+    {% if customization.script_file %}
+    <script src="{{ customization.script_file }}"></script>
+    {% endif %}
+</body>
+</html>

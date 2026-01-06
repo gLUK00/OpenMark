@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  openmark:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./data:/app/data
+      - ./cache:/app/cache
+    environment:
+      - FLASK_ENV=production
+    restart: unless-stopped
+
+  # Optional: MongoDB for annotations storage
+  # Uncomment if using MongoDB plugin
+  # mongodb:
+  #   image: mongo:6
+  #   ports:
+  #     - "27017:27017"
+  #   volumes:
+  #     - mongodb_data:/data/db
+  #   environment:
+  #     - MONGO_INITDB_DATABASE=openmark
+  #   restart: unless-stopped
+
+# volumes:
+#   mongodb_data:

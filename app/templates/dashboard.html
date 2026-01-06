@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenMark - Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand">
+            <a href="/dashboard">🔖 OpenMark</a>
+        </div>
+        <div class="navbar-menu">
+            <a href="/dashboard" class="nav-link active">Dashboard</a>
+            <a href="/statistics" class="nav-link">Statistics</a>
+            <a href="/history" class="nav-link">History</a>
+            <button id="logoutBtn" class="btn btn-outline">Logout</button>
+        </div>
+    </nav>
+    
+    <main class="container">
+        <div class="dashboard-header">
+            <h1>Welcome to OpenMark</h1>
+            <p>Open PDF documents with annotation capabilities</p>
+        </div>
+        
+        <div class="card">
+            <h2>Open a Document</h2>
+            <form id="openDocumentForm" class="document-form">
+                <div class="form-group">
+                    <label for="documentId">Document ID</label>
+                    <input type="text" id="documentId" name="documentId" required
+                           placeholder="Enter document ID (e.g., sample)">
+                </div>
+                
+                <div id="errorMessage" class="error-message" style="display: none;"></div>
+                
+                <button type="submit" class="btn btn-primary">
+                    Open Document
+                </button>
+            </form>
+        </div>
+        
+        <div class="card">
+            <h2>Quick Actions</h2>
+            <div class="quick-actions">
+                <a href="/statistics" class="action-card">
+                    <span class="action-icon">📊</span>
+                    <span class="action-title">View Statistics</span>
+                    <span class="action-desc">See your usage statistics</span>
+                </a>
+                <a href="/history" class="action-card">
+                    <span class="action-icon">📜</span>
+                    <span class="action-title">View History</span>
+                    <span class="action-desc">Browse your document history</span>
+                </a>
+            </div>
+        </div>
+    </main>
+    
+    <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

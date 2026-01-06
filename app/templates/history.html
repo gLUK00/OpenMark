@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenMark - History</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand">
+            <a href="/dashboard">🔖 OpenMark</a>
+        </div>
+        <div class="navbar-menu">
+            <a href="/dashboard" class="nav-link">Dashboard</a>
+            <a href="/statistics" class="nav-link">Statistics</a>
+            <a href="/history" class="nav-link active">History</a>
+            <button id="logoutBtn" class="btn btn-outline">Logout</button>
+        </div>
+    </nav>
+    
+    <main class="container">
+        <div class="page-header">
+            <h1>📜 Document History</h1>
+        </div>
+        
+        <div class="card">
+            <table class="table" id="historyTable">
+                <thead>
+                    <tr>
+                        <th>Document</th>
+                        <th>Date & Time</th>
+                        <th>IP Address</th>
+                        <th>Duration</th>
+                    </tr>
+                </thead>
+                <tbody id="historyBody">
+                    <tr>
+                        <td colspan="4" class="text-center">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="pagination" id="pagination">
+                <!-- Pagination will be added by JavaScript -->
+            </div>
+        </div>
+    </main>
+    
+    <script src="{{ url_for('static', filename='js/auth.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/history.js') }}"></script>
+</body>
+</html>
