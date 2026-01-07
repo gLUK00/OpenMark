@@ -39,7 +39,7 @@ class Config:
         return {
             "server": {
                 "host": "0.0.0.0",
-                "port": 5000,
+                "port": 8080,
                 "debug": True,
                 "secret_key": "dev-secret-key-change-in-production"
             },

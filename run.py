@@ -10,6 +10,6 @@ if __name__ == '__main__':
     config = Config()
     app.run(
         host=config.server.get('host', '0.0.0.0'),
-        port=config.server.get('port', 5000),
+        port=config.server.get('port', 8080),
         debug=config.server.get('debug', False)
     )

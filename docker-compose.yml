@@ -4,7 +4,7 @@ services:
   openmark:
     build: .
     ports:
-      - "5000:5000"
+      - "8080:8080"
     volumes:
       - ./config.json:/app/config.json:ro
       - ./data:/app/data
