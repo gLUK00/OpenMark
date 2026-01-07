@@ -1,0 +1,984 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "OpenMark API",
+    "description": "API for PDF document viewing with annotation capabilities. OpenMark provides secure access to PDF documents with support for notes, highlights, and collaborative annotations.\n\n## Authentication\n\nOpenMark uses two types of tokens:\n\n1. **Auth Token**: Standard JWT token obtained via `/api/authenticate`. Used for most API calls.\n2. **Document Access Token (DAT)**: Self-contained JWT for document access. Survives page refresh.\n\n## Quick Start\n\n### Option 1: Quick View (Single Call)\n```\nPOST /api/quickView\n{\n  \"username\": \"user\",\n  \"password\": \"pass\",\n  \"documentId\": \"sample\"\n}\n```\n\n### Option 2: Three-Step Process\n1. Authenticate → Get token\n2. Request document → Get DAT\n3. View document with DAT",
+    "version": "1.0.0",
+    "contact": {
+      "name": "OpenMark Support"
+    },
+    "license": {
+      "name": "MIT License",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "/api",
+      "description": "Current server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Authentication",
+      "description": "User authentication and session management"
+    },
+    {
+      "name": "Documents",
+      "description": "PDF document access and viewing"
+    },
+    {
+      "name": "Annotations",
+      "description": "Document annotations (notes and highlights)"
+    },
+    {
+      "name": "User Data",
+      "description": "User statistics and history"
+    }
+  ],
+  "paths": {
+    "/authenticate": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Authenticate user",
+        "description": "Authenticate a user with username and password. Returns a JWT token for subsequent API calls.",
+        "operationId": "authenticate",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthRequest"
+              },
+              "example": {
+                "username": "admin",
+                "password": "admin123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authentication successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing username or password",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/logout": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Logout user",
+        "description": "Invalidate the current authentication token.",
+        "operationId": "logout",
+        "security": [
+          {"bearerAuth": []}
+        ],
+        "responses": {
+          "200": {
+            "description": "Logout successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/quickView": {
+      "post": {
+        "tags": ["Documents"],
+        "summary": "Quick view document (single call)",
+        "description": "Authenticate and request a document in one call. Returns a viewer URL with Document Access Token (DAT). This is the recommended method for simple integrations.\n\nThe returned URL can be used directly in an iframe or opened in a new tab. The DAT is self-contained and allows page refresh without losing access.",
+        "operationId": "quickView",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuickViewRequest"
+              },
+              "example": {
+                "username": "admin",
+                "password": "admin123",
+                "documentId": "sample",
+                "hideAnnotationsTools": false,
+                "hideAnnotations": false,
+                "hideLogo": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Document ready for viewing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickViewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing required parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Document not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/requestDocument": {
+      "post": {
+        "tags": ["Documents"],
+        "summary": "Request document access",
+        "description": "Request access to a PDF document. Returns a temporary document ID and Document Access Token (DAT). Use this endpoint after authenticating to get document access.",
+        "operationId": "requestDocument",
+        "security": [
+          {"bearerAuth": []}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestDocumentRequest"
+              },
+              "example": {
+                "documentId": "sample",
+                "hideAnnotationsTools": false,
+                "hideAnnotations": false,
+                "hideLogo": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Document access granted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestDocumentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing documentId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Document not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/documentStatus/{tempDocId}": {
+      "get": {
+        "tags": ["Documents"],
+        "summary": "Get document download status",
+        "description": "Check the download/caching status of a requested document. Status can be: pending, downloading, ready, or error.",
+        "operationId": "getDocumentStatus",
+        "parameters": [
+          {
+            "name": "tempDocId",
+            "in": "path",
+            "required": true,
+            "description": "Temporary document ID returned from requestDocument or quickView",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dat",
+            "in": "query",
+            "required": false,
+            "description": "Document Access Token (alternative to Bearer token)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [
+          {"bearerAuth": []},
+          {"datAuth": []}
+        ],
+        "responses": {
+          "200": {
+            "description": "Document status retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Access denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Document not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/viewDocument": {
+      "get": {
+        "tags": ["Documents"],
+        "summary": "View document in PDF viewer",
+        "description": "Redirect to the PDF viewer with the specified document. Use the Document Access Token (DAT) for authentication.",
+        "operationId": "viewDocument",
+        "parameters": [
+          {
+            "name": "dat",
+            "in": "query",
+            "required": true,
+            "description": "Document Access Token",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to PDF viewer"
+          },
+          "401": {
+            "description": "Invalid or expired DAT"
+          }
+        }
+      }
+    },
+    "/getAnnotations": {
+      "get": {
+        "tags": ["Annotations"],
+        "summary": "Get document annotations",
+        "description": "Retrieve all annotations (notes and highlights) for a specific document.",
+        "operationId": "getAnnotations",
+        "security": [
+          {"bearerAuth": []},
+          {"datAuth": []}
+        ],
+        "parameters": [
+          {
+            "name": "documentId",
+            "in": "query",
+            "required": true,
+            "description": "Document ID to get annotations for",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Annotations retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetAnnotationsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing documentId",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/saveAnnotations": {
+      "post": {
+        "tags": ["Annotations"],
+        "summary": "Save document annotations",
+        "description": "Save annotations (notes and highlights) for a document. Replaces existing annotations for the user/document combination.",
+        "operationId": "saveAnnotations",
+        "security": [
+          {"bearerAuth": []},
+          {"datAuth": []}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveAnnotationsRequest"
+              },
+              "example": {
+                "documentId": "sample",
+                "annotations": {
+                  "notes": [
+                    {
+                      "id": "note-1",
+                      "page": 1,
+                      "x": 100,
+                      "y": 200,
+                      "content": "Important section",
+                      "color": "#ffeb3b"
+                    }
+                  ],
+                  "highlights": [
+                    {
+                      "id": "highlight-1",
+                      "page": 1,
+                      "rects": [{"x": 50, "y": 100, "width": 200, "height": 20}],
+                      "color": "#ffff00"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Annotations saved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Annotations saved successfully"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing required parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to save annotations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/statistics": {
+      "get": {
+        "tags": ["User Data"],
+        "summary": "Get user statistics",
+        "description": "Retrieve usage statistics for the authenticated user including documents viewed, notes created, and highlights created.",
+        "operationId": "getStatistics",
+        "security": [
+          {"bearerAuth": []}
+        ],
+        "responses": {
+          "200": {
+            "description": "Statistics retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatisticsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/history": {
+      "get": {
+        "tags": ["User Data"],
+        "summary": "Get consultation history",
+        "description": "Retrieve document consultation history for the authenticated user with pagination support.",
+        "operationId": "getHistory",
+        "security": [
+          {"bearerAuth": []}
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of records to return",
+            "schema": {
+              "type": "integer",
+              "default": 50
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Number of records to skip",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "History retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT token obtained from /authenticate endpoint"
+      },
+      "datAuth": {
+        "type": "apiKey",
+        "in": "query",
+        "name": "dat",
+        "description": "Document Access Token for document-specific operations"
+      }
+    },
+    "schemas": {
+      "AuthRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "User's username"
+          },
+          "password": {
+            "type": "string",
+            "description": "User's password"
+          }
+        }
+      },
+      "AuthResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "token": {
+            "type": "string",
+            "description": "JWT authentication token"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Token expiration timestamp"
+          }
+        }
+      },
+      "QuickViewRequest": {
+        "type": "object",
+        "required": ["username", "password", "documentId"],
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "User's username"
+          },
+          "password": {
+            "type": "string",
+            "description": "User's password"
+          },
+          "documentId": {
+            "type": "string",
+            "description": "ID of the document to view"
+          },
+          "hideAnnotationsTools": {
+            "type": "boolean",
+            "default": false,
+            "description": "Hide annotation tools in the viewer"
+          },
+          "hideAnnotations": {
+            "type": "boolean",
+            "default": false,
+            "description": "Hide existing annotations"
+          },
+          "hideLogo": {
+            "type": "boolean",
+            "default": false,
+            "description": "Hide the OpenMark logo"
+          }
+        }
+      },
+      "QuickViewResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "viewUrl": {
+            "type": "string",
+            "description": "URL to view the document (includes DAT)"
+          },
+          "dat": {
+            "type": "string",
+            "description": "Document Access Token"
+          },
+          "tempDocumentId": {
+            "type": "string",
+            "description": "Temporary document identifier"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "DAT expiration timestamp"
+          }
+        }
+      },
+      "RequestDocumentRequest": {
+        "type": "object",
+        "required": ["documentId"],
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "description": "ID of the document to request"
+          },
+          "hideAnnotationsTools": {
+            "type": "boolean",
+            "default": false,
+            "description": "Hide annotation tools in the viewer"
+          },
+          "hideAnnotations": {
+            "type": "boolean",
+            "default": false,
+            "description": "Hide existing annotations"
+          },
+          "hideLogo": {
+            "type": "boolean",
+            "default": false,
+            "description": "Hide the OpenMark logo"
+          }
+        }
+      },
+      "RequestDocumentResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "tempDocumentId": {
+            "type": "string",
+            "description": "Temporary document identifier"
+          },
+          "dat": {
+            "type": "string",
+            "description": "Document Access Token"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Token expiration timestamp"
+          }
+        }
+      },
+      "DocumentStatusResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "downloading", "ready", "error"],
+            "description": "Current download status"
+          },
+          "documentId": {
+            "type": "string",
+            "description": "Original document ID"
+          }
+        }
+      },
+      "GetAnnotationsResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "annotations": {
+            "$ref": "#/components/schemas/Annotations"
+          }
+        }
+      },
+      "SaveAnnotationsRequest": {
+        "type": "object",
+        "required": ["documentId", "annotations"],
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "description": "Document ID to save annotations for"
+          },
+          "annotations": {
+            "$ref": "#/components/schemas/Annotations"
+          }
+        }
+      },
+      "Annotations": {
+        "type": "object",
+        "properties": {
+          "notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Note"
+            }
+          },
+          "highlights": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Highlight"
+            }
+          }
+        }
+      },
+      "Note": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique note identifier"
+          },
+          "page": {
+            "type": "integer",
+            "description": "Page number (1-indexed)"
+          },
+          "x": {
+            "type": "number",
+            "description": "X coordinate on the page"
+          },
+          "y": {
+            "type": "number",
+            "description": "Y coordinate on the page"
+          },
+          "content": {
+            "type": "string",
+            "description": "Note text content"
+          },
+          "color": {
+            "type": "string",
+            "description": "Note color (hex format)"
+          }
+        }
+      },
+      "Highlight": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique highlight identifier"
+          },
+          "page": {
+            "type": "integer",
+            "description": "Page number (1-indexed)"
+          },
+          "rects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "width": {"type": "number"},
+                "height": {"type": "number"}
+              }
+            },
+            "description": "Rectangle areas to highlight"
+          },
+          "color": {
+            "type": "string",
+            "description": "Highlight color (hex format)"
+          }
+        }
+      },
+      "StatisticsResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "statistics": {
+            "type": "object",
+            "properties": {
+              "documents_viewed": {
+                "type": "integer",
+                "description": "Number of documents viewed"
+              },
+              "notes_created": {
+                "type": "integer",
+                "description": "Number of notes created"
+              },
+              "highlights_created": {
+                "type": "integer",
+                "description": "Number of highlights created"
+              },
+              "last_activity": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Last activity timestamp"
+              }
+            }
+          }
+        }
+      },
+      "HistoryResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HistoryEntry"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "description": "Total number of history entries"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Applied limit"
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Applied offset"
+          }
+        }
+      },
+      "HistoryEntry": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "description": "Document identifier"
+          },
+          "document_name": {
+            "type": "string",
+            "description": "Document display name"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "View timestamp"
+          },
+          "ip_address": {
+            "type": "string",
+            "description": "Client IP address"
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "description": "Viewing duration in seconds"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": false
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message"
+          }
+        }
+      }
+    }
+  }
+}

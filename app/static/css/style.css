@@ -68,6 +68,19 @@ body {
     background-color: #c82333;
 }
 
+.btn-swagger {
+    background-color: #85ea2d;
+    color: #173647;
+    border: none;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.btn-swagger:hover {
+    background-color: #6fc21f;
+    color: #173647;
+}
+
 .btn-block {
     display: block;
     width: 100%;

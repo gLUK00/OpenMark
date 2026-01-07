@@ -2,10 +2,15 @@
 
 from flask import Flask
 from flask_cors import CORS
+from flask_swagger_ui import get_swaggerui_blueprint
 
 from app.config import Config
 from app.plugins import PluginManager
 from app.jwt_handler import init_jwt_handler
+
+# Swagger UI configuration
+SWAGGER_URL = '/api/docs'
+API_URL = '/static/swagger.json'
 
 
 def create_app(config_path: str = 'config.json') -> Flask:
@@ -45,6 +50,20 @@ def create_app(config_path: str = 'config.json') -> Flask:
     # Initialize plugin manager
     plugin_manager = PluginManager(config)
     app.config['PLUGIN_MANAGER'] = plugin_manager
+    
+    # Register Swagger UI blueprint
+    swaggerui_blueprint = get_swaggerui_blueprint(
+        SWAGGER_URL,
+        API_URL,
+        config={
+            'app_name': "OpenMark API Documentation",
+            'docExpansion': 'list',
+            'defaultModelsExpandDepth': 2,
+            'defaultModelExpandDepth': 2,
+            'tryItOutEnabled': True
+        }
+    )
+    app.register_blueprint(swaggerui_blueprint, url_prefix=SWAGGER_URL)
     
     # Register blueprints
     from app.routes import api_bp, views_bp
