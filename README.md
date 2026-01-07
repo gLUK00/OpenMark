@@ -6,6 +6,8 @@
 
 OpenMark is a comprehensive PDF visualization solution with annotation capabilities, including virtual sticky notes and text highlighting features.
 
+![Démo OpenMark](https://github.com/gLUK00/OpenMark/raw/main/docs/openMark.gif)
+
 ## Features
 
 - 📄 **PDF Visualization** - View PDF documents directly in your browser

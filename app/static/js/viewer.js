@@ -936,15 +936,17 @@ class PDFViewer {
     
     updateAnnotationsList() {
         const accordion = document.getElementById('pagesAccordion');
+        
+        // Save the state of expanded sections before rebuilding
+        const expandedPages = new Set();
+        accordion.querySelectorAll('.accordion-section.active').forEach(section => {
+            expandedPages.add(parseInt(section.dataset.page));
+        });
+        
         accordion.innerHTML = '';
         
         // Group annotations by page
         const pageAnnotations = {};
-        
-        // Initialize all pages up to totalPages
-        for (let i = 1; i <= this.totalPages; i++) {
-            pageAnnotations[i] = { notes: [], highlights: [] };
-        }
         
         // Group notes by page
         this.annotations.notes.forEach(note => {
@@ -962,46 +964,51 @@ class PDFViewer {
             pageAnnotations[highlight.page].highlights.push(highlight);
         });
         
-        // Create accordion sections for pages with annotations or current page
+        // Create accordion sections only for pages with annotations
         const pagesToShow = new Set();
         Object.keys(pageAnnotations).forEach(page => {
             const p = parseInt(page);
-            if (pageAnnotations[p].notes.length > 0 || pageAnnotations[p].highlights.length > 0 || p === this.currentPage) {
+            if (pageAnnotations[p].notes.length > 0 || pageAnnotations[p].highlights.length > 0) {
                 pagesToShow.add(p);
             }
         });
         
-        // Always add current page
-        pagesToShow.add(this.currentPage);
-        
         // Sort pages
         const sortedPages = Array.from(pagesToShow).sort((a, b) => a - b);
+        
+        // Show message if no annotations
+        if (sortedPages.length === 0) {
+            accordion.innerHTML = '<p class="no-annotations">No annotations in this document</p>';
+            return;
+        }
         
         sortedPages.forEach(page => {
             const data = pageAnnotations[page];
             const isCurrentPage = page === this.currentPage;
+            const wasExpanded = expandedPages.has(page);
+            const shouldBeActive = isCurrentPage || wasExpanded;
             const notesCount = data.notes.length;
             const highlightsCount = data.highlights.length;
             
             // Build header text
             let headerText = `Page ${page}`;
-            if (!isCurrentPage && (notesCount > 0 || highlightsCount > 0)) {
-                const parts = [];
-                if (notesCount > 0) parts.push(`Notes (${notesCount})`);
-                if (highlightsCount > 0) parts.push(`Highlights (${highlightsCount})`);
+            const parts = [];
+            if (notesCount > 0) parts.push(`Notes (${notesCount})`);
+            if (highlightsCount > 0) parts.push(`Highlights (${highlightsCount})`);
+            if (parts.length > 0) {
                 headerText += ` - ${parts.join(' - ')}`;
             }
             
             const section = document.createElement('div');
-            section.className = `accordion-section${isCurrentPage ? ' active' : ''}`;
+            section.className = `accordion-section${shouldBeActive ? ' active' : ''}`;
             section.dataset.page = page;
             
             section.innerHTML = `
                 <div class="accordion-header" onclick="viewer.toggleAccordion(${page})">
-                    <span class="accordion-icon">${isCurrentPage ? '▼' : '▶'}</span>
+                    <span class="accordion-icon">${shouldBeActive ? '▼' : '▶'}</span>
                     <span class="accordion-title">${headerText}</span>
                 </div>
-                <div class="accordion-content" style="${isCurrentPage ? '' : 'display: none;'}">
+                <div class="accordion-content" style="${shouldBeActive ? '' : 'display: none;'}">
                     ${this.renderPageAnnotations(data, page)}
                 </div>
             `;
@@ -1049,10 +1056,6 @@ class PDFViewer {
             });
             
             html += `</div></div>`;
-        }
-        
-        if (data.notes.length === 0 && data.highlights.length === 0) {
-            html = '<p class="no-annotations">No annotations on this page</p>';
         }
         
         return html;
@@ -1133,8 +1136,9 @@ class PDFViewer {
                 'Content-Type': 'application/json',
                 ...this.getAuthHeaders()
             };
+            const authParam = this.getAuthQueryParam();
             
-            const response = await fetch('/api/saveAnnotations', {
+            const response = await fetch(`/api/saveAnnotations?${authParam}`, {
                 method: 'POST',
                 headers: headers,
                 body: JSON.stringify({
