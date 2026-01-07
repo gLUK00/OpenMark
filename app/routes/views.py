@@ -30,7 +30,7 @@ def add_iframe_headers(response):
 @views_bp.route('/')
 def index():
     """Render the login page."""
-    return render_template('login.html')
+    return render_template('login.html', debug=current_app.config.get('DEBUG', False))
 
 
 @views_bp.route('/dashboard')
