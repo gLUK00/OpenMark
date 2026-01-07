@@ -60,6 +60,18 @@ class PluginManager:
         if plugin_type == 'local':
             from app.plugins.auth.local_auth import LocalAuthPlugin
             return LocalAuthPlugin(config)
+        elif plugin_type == 'oauth':
+            from app.plugins.auth.oauth_auth import OAuthAuthPlugin
+            return OAuthAuthPlugin(config)
+        elif plugin_type == 'saml':
+            from app.plugins.auth.saml_auth import SAMLAuthPlugin
+            return SAMLAuthPlugin(config)
+        elif plugin_type == 'mongodb':
+            from app.plugins.auth.mongodb_auth import MongoDBAuthPlugin
+            return MongoDBAuthPlugin(config)
+        elif plugin_type == 'postgresql':
+            from app.plugins.auth.postgresql_auth import PostgreSQLAuthPlugin
+            return PostgreSQLAuthPlugin(config)
         else:
             raise ValueError(f"Unknown authentication plugin type: {plugin_type}")
     
@@ -95,6 +107,9 @@ class PluginManager:
         elif plugin_type == 'mongodb':
             from app.plugins.annotations.mongodb_annotations import MongoDBAnnotationsPlugin
             return MongoDBAnnotationsPlugin(config)
+        elif plugin_type == 'postgresql':
+            from app.plugins.annotations.postgresql_annotations import PostgreSQLAnnotationsPlugin
+            return PostgreSQLAnnotationsPlugin(config)
         else:
             raise ValueError(f"Unknown annotations plugin type: {plugin_type}")
     

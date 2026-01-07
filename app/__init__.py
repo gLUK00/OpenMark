@@ -5,6 +5,7 @@ from flask_cors import CORS
 
 from app.config import Config
 from app.plugins import PluginManager
+from app.jwt_handler import init_jwt_handler
 
 
 def create_app(config_path: str = 'config.json') -> Flask:
@@ -25,8 +26,21 @@ def create_app(config_path: str = 'config.json') -> Flask:
     app.config['SECRET_KEY'] = config.server.get('secret_key', 'dev-secret-key')
     app.config['CONFIG'] = config
     
-    # Initialize CORS
-    CORS(app)
+    # Initialize JWT handler for Document Access Tokens
+    jwt_handler = init_jwt_handler(app.config['SECRET_KEY'])
+    app.config['JWT_HANDLER'] = jwt_handler
+    
+    # Initialize CORS with full cross-domain support
+    # Allow all origins for API and viewer routes
+    cors_config = config.server.get('cors', {})
+    allowed_origins = cors_config.get('allowed_origins', '*')
+    
+    CORS(app, 
+         origins=allowed_origins,
+         allow_headers=['Content-Type', 'Authorization', 'X-Requested-With'],
+         methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+         supports_credentials=True,
+         expose_headers=['Content-Type', 'Content-Length'])
     
     # Initialize plugin manager
     plugin_manager = PluginManager(config)
@@ -36,5 +50,11 @@ def create_app(config_path: str = 'config.json') -> Flask:
     from app.routes import api_bp, views_bp
     app.register_blueprint(api_bp, url_prefix='/api')
     app.register_blueprint(views_bp)
+    
+    # Initialize cache cleaner (only in non-reloader process)
+    import os
+    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
+        from app.cache_cleaner import init_cache_cleaner
+        init_cache_cleaner(app)
     
     return app

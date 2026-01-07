@@ -6,7 +6,7 @@
     <title>OpenMark - PDF Viewer</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/viewer.css') }}">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="{{ url_for('static', filename='lib/pdfjs/pdf.min.js') }}"></script>
     {% if customization.primary_color %}
     <style>
         :root {
@@ -20,6 +20,7 @@
     <div class="viewer-toolbar">
         <div class="toolbar-left">
             <a href="/dashboard" class="toolbar-brand">🔖 OpenMark</a>
+            <button class="toolbar-btn" id="showSidebar" title="Show Annotations" style="display: none;">▶</button>
             <span class="toolbar-separator"></span>
             <span class="document-name" id="documentName">{{ document_id }}</span>
         </div>
@@ -42,9 +43,6 @@
         </div>
         
         <div class="toolbar-right">
-            <button class="toolbar-btn tool-btn" id="selectTool" title="Select" data-tool="select">
-                ↖
-            </button>
             <button class="toolbar-btn tool-btn" id="noteTool" title="Add Note" data-tool="note">
                 📝
             </button>
@@ -74,19 +72,29 @@
                 <button class="sidebar-toggle" id="toggleSidebar">◀</button>
             </div>
             <div class="sidebar-content">
-                <div class="annotation-section">
-                    <h4>📝 Notes (<span id="notesCount">0</span>)</h4>
-                    <div class="annotation-list" id="notesList"></div>
-                </div>
-                <div class="annotation-section">
-                    <h4>🖍️ Highlights (<span id="highlightsCount">0</span>)</h4>
-                    <div class="annotation-list" id="highlightsList"></div>
+                <div id="pagesAccordion" class="pages-accordion">
+                    <!-- Pages will be dynamically generated -->
                 </div>
             </div>
         </div>
         
         <!-- PDF Canvas Container -->
         <div class="pdf-container" id="pdfContainer">
+            <!-- Loading overlay -->
+            <div class="loading-overlay" id="loadingOverlay">
+                <div class="loading-spinner"></div>
+                <div class="loading-text">Loading PDF...</div>
+                <div class="loading-progress" id="loadingProgress"></div>
+            </div>
+            
+            <!-- Error overlay -->
+            <div class="error-overlay" id="errorOverlay" style="display: none;">
+                <div class="error-icon">⚠️</div>
+                <div class="error-title">Failed to load PDF</div>
+                <div class="error-message" id="errorMessage">An error occurred while loading the document.</div>
+                <button class="btn btn-primary" id="retryLoadBtn">Retry</button>
+            </div>
+            
             <div class="pdf-page-wrapper" id="pageWrapper">
                 <canvas id="pdfCanvas"></canvas>
                 <div class="annotations-layer" id="annotationsLayer"></div>
@@ -117,8 +125,20 @@
         window.OPENMARK = {
             tempDocumentId: "{{ temp_doc_id }}",
             documentId: "{{ document_id }}",
+            {% if dat %}
+            // Document Access Token (DAT) - preferred method
+            dat: "{{ dat }}",
+            token: null,
+            pdfUrl: "/pdf/{{ temp_doc_id }}?dat={{ dat }}",
+            {% else %}
+            // Legacy token method
+            dat: null,
             token: "{{ token }}",
-            pdfUrl: "/pdf/{{ temp_doc_id }}?token={{ token }}"
+            pdfUrl: "/pdf/{{ temp_doc_id }}?token={{ token }}",
+            {% endif %}
+            hideAnnotationsTools: {{ 'true' if hide_annotations_tools else 'false' }},
+            hideAnnotations: {{ 'true' if hide_annotations else 'false' }},
+            hideLogo: {{ 'true' if hide_logo else 'false' }}
         };
     </script>
     <script src="{{ url_for('static', filename='js/viewer.js') }}"></script>

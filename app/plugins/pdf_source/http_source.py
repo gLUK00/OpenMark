@@ -1,6 +1,6 @@
 """HTTP-based PDF source plugin."""
 
-import os
+import os, time
 from typing import Optional
 from urllib.parse import urljoin
 
@@ -62,6 +62,7 @@ class HTTPSourcePlugin(PDFSourcePlugin):
         Returns:
             PDF bytes if found, None otherwise
         """
+        
         # First try local path
         local_path = self._get_local_path(document_id)
         if os.path.exists(local_path):
@@ -78,13 +79,26 @@ class HTTPSourcePlugin(PDFSourcePlugin):
                 response = requests.get(
                     url,
                     headers=self.headers,
-                    timeout=self.timeout
+                    timeout=self.timeout,
+                    allow_redirects=True  # Follow redirects (cross-domain included)
                 )
                 
                 if response.status_code == 200:
-                    return response.content
-            except requests.RequestException:
-                pass
+                    # Verify it's actually a PDF
+                    content_type = response.headers.get('Content-Type', '')
+                    if 'pdf' in content_type.lower() or response.content[:4] == b'%PDF':
+                        return response.content
+                    else:
+                        print(f"Warning: Content-Type '{content_type}' may not be a PDF")
+                        return response.content
+                else:
+                    print(f"HTTP error {response.status_code} fetching document {document_id}")
+            except requests.Timeout:
+                print(f"Timeout fetching document {document_id} from {self.base_url}")
+            except requests.ConnectionError as e:
+                print(f"Connection error fetching document {document_id}: {e}")
+            except requests.RequestException as e:
+                print(f"Request error fetching document {document_id}: {e}")
         
         return None
     

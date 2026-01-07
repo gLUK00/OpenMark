@@ -1,9 +1,16 @@
 # OpenMark Dependencies
 Flask==3.0.0
-Flask-CORS==4.0.0
+Flask-CORS==6.0.2
 PyJWT==2.8.0
 requests==2.31.0
 pymongo==4.6.1
 python-dotenv==1.0.0
 Werkzeug==3.0.1
-gunicorn==21.2.0
+gunicorn==23.0.0
+# Optional: PostgreSQL authentication plugin
+# pip install psycopg2-binary
+psycopg2-binary==2.9.9
+
+# Optional: SAML SSO authentication plugin
+# pip install python3-saml
+# python3-saml==1.16.0

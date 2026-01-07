@@ -3,11 +3,28 @@
 import os
 from datetime import datetime
 
-from flask import Blueprint, request, render_template, redirect, url_for, current_app, send_file, abort
+from flask import Blueprint, request, render_template, redirect, url_for, current_app, send_file, abort, make_response
 
 from app.routes.api import temp_documents, require_auth, record_document_view
+from app.jwt_handler import get_jwt_handler
 
 views_bp = Blueprint('views', __name__)
+
+
+def add_iframe_headers(response):
+    """Add headers to allow embedding in iframe from any origin."""
+    # Remove X-Frame-Options to allow iframe embedding
+    response.headers.pop('X-Frame-Options', None)
+    
+    # Set Content-Security-Policy to allow embedding from any origin
+    # frame-ancestors * allows the page to be embedded in any iframe
+    response.headers['Content-Security-Policy'] = "frame-ancestors *"
+    
+    # Allow cross-origin isolation for SharedArrayBuffer if needed
+    response.headers['Cross-Origin-Embedder-Policy'] = 'credentialless'
+    response.headers['Cross-Origin-Opener-Policy'] = 'same-origin-allow-popups'
+    
+    return response
 
 
 @views_bp.route('/')
@@ -36,16 +53,82 @@ def history_page():
 
 @views_bp.route('/api/viewDocument')
 def view_document():
-    """Render the PDF viewer page."""
+    """Render the PDF viewer page.
+    
+    Supports two authentication methods:
+    1. DAT (Document Access Token) - Recommended, self-contained JWT
+       URL: /api/viewDocument?dat=<jwt_token>
+       
+    2. Legacy (tempDocumentId + token) - For backward compatibility
+       URL: /api/viewDocument?tempDocumentId=<id>&token=<auth_token>
+    
+    The DAT method is preferred as it:
+    - Contains all necessary information in a single token
+    - Survives page refresh (F5) without issues
+    - Has longer validity (2 hours by default)
+    - Doesn't require auth token validation on each request
+    """
+    jwt_handler = current_app.config['JWT_HANDLER']
+    plugin_manager = current_app.config['PLUGIN_MANAGER']
+    config = current_app.config['CONFIG']
+    
+    # Try DAT (Document Access Token) first - preferred method
+    dat = request.args.get('dat')
+    
+    if dat:
+        # Validate DAT
+        dat_info = jwt_handler.validate_document_token(dat)
+        
+        if not dat_info:
+            return render_template('error.html', 
+                                   error='Invalid or expired document access token'), 401
+        
+        temp_doc_id = dat_info['temp_document_id']
+        username = dat_info['username']
+        document_id = dat_info['document_id']
+        hide_annotations_tools = dat_info['hide_annotations_tools']
+        hide_annotations = dat_info['hide_annotations']
+        hide_logo = dat_info['hide_logo']
+        
+        # Check if temp document still exists in cache
+        if temp_doc_id not in temp_documents:
+            return render_template('error.html', 
+                                   error='Document cache expired. Please request a new access token.'), 410
+        
+        # Record document view
+        record_document_view(username, document_id)
+        
+        # Get customization settings
+        customization = config.customization
+        
+        response = make_response(render_template('viewer.html',
+                               temp_doc_id=temp_doc_id,
+                               document_id=document_id,
+                               dat=dat,  # Pass DAT for API calls
+                               token=None,  # No separate token needed
+                               customization=customization,
+                               hide_annotations_tools=hide_annotations_tools,
+                               hide_annotations=hide_annotations,
+                               hide_logo=hide_logo))
+        
+        return add_iframe_headers(response)
+    
+    # Legacy method: tempDocumentId + token
     temp_doc_id = request.args.get('tempDocumentId')
     token = request.args.get('token')
+    hide_annotations_tools = request.args.get('hideAnnotationsTools', 'false').lower() == 'true'
+    hide_annotations = request.args.get('hideAnnotations', 'false').lower() == 'true'
+    hide_logo = request.args.get('hideLogo', 'false').lower() == 'true'
+    
+    # If hideAnnotations is true, also hide the tools
+    if hide_annotations:
+        hide_annotations_tools = True
     
     if not temp_doc_id or not token:
         return render_template('error.html', 
-                               error='Missing tempDocumentId or token'), 400
+                               error='Missing document access token (dat) or tempDocumentId/token parameters'), 400
     
     # Validate token
-    plugin_manager = current_app.config['PLUGIN_MANAGER']
     user = plugin_manager.auth_plugin.validate_token(token)
     
     if not user:
@@ -75,29 +158,51 @@ def view_document():
     record_document_view(user['username'], doc_info['document_id'])
     
     # Get customization settings
-    config = current_app.config['CONFIG']
     customization = config.customization
     
-    return render_template('viewer.html',
+    response = make_response(render_template('viewer.html',
                            temp_doc_id=temp_doc_id,
                            document_id=doc_info['document_id'],
+                           dat=None,
                            token=token,
-                           customization=customization)
+                           customization=customization,
+                           hide_annotations_tools=hide_annotations_tools,
+                           hide_annotations=hide_annotations,
+                           hide_logo=hide_logo))
+    
+    # Add headers to allow iframe embedding from any origin
+    return add_iframe_headers(response)
 
 
 @views_bp.route('/pdf/<temp_doc_id>')
 def serve_pdf(temp_doc_id):
-    """Serve a cached PDF file."""
-    token = request.args.get('token')
+    """Serve a cached PDF file.
     
-    if not token:
-        abort(401)
-    
-    # Validate token
+    Supports authentication via:
+    - DAT (dat query parameter)
+    - Auth token (token query parameter)
+    """
+    jwt_handler = current_app.config['JWT_HANDLER']
     plugin_manager = current_app.config['PLUGIN_MANAGER']
-    user = plugin_manager.auth_plugin.validate_token(token)
     
-    if not user:
+    # Try DAT first
+    dat = request.args.get('dat')
+    username = None
+    
+    if dat:
+        dat_info = jwt_handler.validate_document_token(dat)
+        if dat_info and dat_info['temp_document_id'] == temp_doc_id:
+            username = dat_info['username']
+    
+    # Fallback to token
+    if not username:
+        token = request.args.get('token')
+        if token:
+            user = plugin_manager.auth_plugin.validate_token(token)
+            if user:
+                username = user['username']
+    
+    if not username:
         abort(401)
     
     # Check if temp document exists
@@ -107,15 +212,24 @@ def serve_pdf(temp_doc_id):
     doc_info = temp_documents[temp_doc_id]
     
     # Check if user matches
-    if doc_info['user'] != user['username']:
+    if doc_info['user'] != username:
         abort(403)
     
-    # Serve the cached PDF
+    # Serve the cached PDF - use absolute path from app root
     config = current_app.config['CONFIG']
-    cache_dir = config.cache.get('directory', './cache')
+    cache_dir_config = config.cache.get('directory', './cache')
+    app_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    cache_dir = os.path.join(app_root, cache_dir_config.lstrip('./'))
     cache_path = os.path.join(cache_dir, f"{temp_doc_id}.pdf")
     
     if not os.path.exists(cache_path):
         abort(404)
     
-    return send_file(cache_path, mimetype='application/pdf')
+    response = make_response(send_file(cache_path, mimetype='application/pdf'))
+    
+    # Add CORS headers for cross-domain PDF access
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    
+    return response

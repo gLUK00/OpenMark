@@ -3,32 +3,55 @@
 import os
 import uuid
 import hashlib
+import threading
 from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import Blueprint, request, jsonify, current_app, g
 
+from app.jwt_handler import get_jwt_handler
+
 api_bp = Blueprint('api', __name__)
 
 # In-memory storage for temporary documents and sessions
 temp_documents = {}
+download_status = {}  # Track download status: 'pending', 'downloading', 'ready', 'error'
 active_tokens = {}
 user_statistics = {}
 user_history = {}
 
 
 def require_auth(f):
-    """Decorator to require authentication for API endpoints."""
+    """Decorator to require authentication for API endpoints.
+    
+    Supports multiple authentication methods:
+    1. Bearer token in Authorization header
+    2. token query parameter
+    3. DAT (Document Access Token) query parameter
+    """
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        token = None
+        jwt_handler = get_jwt_handler()
+        plugin_manager = current_app.config['PLUGIN_MANAGER']
         
-        # Check Authorization header
+        # Try DAT (Document Access Token) first
+        dat = request.args.get('dat')
+        if dat and jwt_handler:
+            dat_info = jwt_handler.validate_document_token(dat)
+            if dat_info:
+                g.user = {'username': dat_info['username'], 'role': 'user'}
+                g.token = None
+                g.dat = dat
+                g.dat_info = dat_info
+                return f(*args, **kwargs)
+        
+        # Try Bearer token
+        token = None
         auth_header = request.headers.get('Authorization')
         if auth_header and auth_header.startswith('Bearer '):
             token = auth_header.split(' ')[1]
         
-        # Check query parameter (for viewDocument)
+        # Check query parameter (legacy)
         if not token:
             token = request.args.get('token')
         
@@ -36,7 +59,6 @@ def require_auth(f):
             return jsonify({'success': False, 'error': 'Missing authentication token'}), 401
         
         # Validate token
-        plugin_manager = current_app.config['PLUGIN_MANAGER']
         user = plugin_manager.auth_plugin.validate_token(token)
         
         if not user:
@@ -44,6 +66,8 @@ def require_auth(f):
         
         g.user = user
         g.token = token
+        g.dat = None
+        g.dat_info = None
         return f(*args, **kwargs)
     
     return decorated_function
@@ -83,6 +107,125 @@ def authenticate():
     return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
 
 
+@api_bp.route('/quickView', methods=['POST'])
+def quick_view():
+    """Authenticate and request a document in one call, returning the viewer URL.
+    
+    This API simplifies integration by combining authentication and document
+    request into a single call. It returns a ready-to-use URL with a Document
+    Access Token (DAT) for embedding the PDF viewer in an iframe or opening 
+    in a new tab.
+    
+    The DAT is a self-contained JWT that includes all necessary information
+    to access the document without requiring additional authentication validation.
+    This means the page can be refreshed (F5) without losing access as long as
+    the DAT is still valid.
+    """
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({'success': False, 'error': 'Missing request body'}), 400
+    
+    username = data.get('username')
+    password = data.get('password')
+    document_id = data.get('documentId')
+    
+    # Optional view parameters
+    hide_annotations_tools = data.get('hideAnnotationsTools', False)
+    hide_annotations = data.get('hideAnnotations', False)
+    hide_logo = data.get('hideLogo', False)
+    
+    if not username or not password:
+        return jsonify({'success': False, 'error': 'Missing username or password'}), 400
+    
+    if not document_id:
+        return jsonify({'success': False, 'error': 'Missing documentId'}), 400
+    
+    plugin_manager = current_app.config['PLUGIN_MANAGER']
+    config = current_app.config['CONFIG']
+    jwt_handler = current_app.config['JWT_HANDLER']
+    
+    # Step 1: Authenticate
+    auth_result = plugin_manager.auth_plugin.authenticate(username, password)
+    
+    if not auth_result:
+        return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
+    
+    # Step 2: Check if document exists
+    if not plugin_manager.pdf_plugin.document_exists(document_id):
+        return jsonify({'success': False, 'error': 'Document not found'}), 404
+    
+    # Step 3: Generate temporary document ID and cache settings
+    temp_doc_id = f"temp_{uuid.uuid4().hex}"
+    cache_duration = config.cache.get('duration_seconds', 3600)
+    
+    # DAT (Document Access Token) validity: longer than cache to allow viewing
+    # Default: 2 hours or cache duration * 4, whichever is longer
+    dat_duration = max(7200, cache_duration * 4)
+    dat_expires_at = datetime.utcnow() + timedelta(seconds=dat_duration)
+    cache_expires_at = datetime.utcnow() + timedelta(seconds=cache_duration)
+    
+    # Store temporary document mapping
+    temp_documents[temp_doc_id] = {
+        'document_id': document_id,
+        'user': username,
+        'expires_at': dat_expires_at.isoformat() + 'Z',  # Use DAT expiry for cache
+        'created_at': datetime.utcnow().isoformat() + 'Z'
+    }
+    
+    # Initialize download status
+    download_status[temp_doc_id] = 'pending'
+    
+    # Cache the document in background thread
+    cache_dir_config = config.cache.get('directory', './cache')
+    app_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    cache_dir = os.path.join(app_root, cache_dir_config.lstrip('./'))
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, f"{temp_doc_id}.pdf")
+    
+    # Start background download
+    def download_pdf():
+        try:
+            download_status[temp_doc_id] = 'downloading'
+            pdf_data = plugin_manager.pdf_plugin.get_document(document_id)
+            
+            if pdf_data:
+                with open(cache_path, 'wb') as f:
+                    f.write(pdf_data)
+                download_status[temp_doc_id] = 'ready'
+            else:
+                download_status[temp_doc_id] = 'error'
+        except Exception as e:
+            print(f"Error downloading PDF {document_id}: {e}")
+            download_status[temp_doc_id] = 'error'
+    
+    thread = threading.Thread(target=download_pdf)
+    thread.daemon = True
+    thread.start()
+    
+    # Step 4: Generate Document Access Token (DAT)
+    dat = jwt_handler.generate_document_token(
+        temp_document_id=temp_doc_id,
+        document_id=document_id,
+        username=username,
+        expires_in_seconds=dat_duration,
+        hide_annotations_tools=hide_annotations_tools,
+        hide_annotations=hide_annotations,
+        hide_logo=hide_logo
+    )
+    
+    # Step 5: Build the viewer URL with DAT only (no separate token needed)
+    view_path = f"/api/viewDocument?dat={dat}"
+    
+    return jsonify({
+        'success': True,
+        'viewUrl': view_path,
+        'dat': dat,  # Document Access Token
+        'tempDocumentId': temp_doc_id,
+        'expires_at': dat_expires_at.isoformat() + 'Z'
+    })
+
+
 @api_bp.route('/logout', methods=['POST'])
 @require_auth
 def logout():
@@ -96,7 +239,12 @@ def logout():
 @api_bp.route('/requestDocument', methods=['POST'])
 @require_auth
 def request_document():
-    """Request a PDF document for viewing."""
+    """Request a PDF document for viewing.
+    
+    Returns both the tempDocumentId (for legacy compatibility) and a 
+    Document Access Token (DAT) that can be used to access the viewer
+    without requiring additional authentication validation.
+    """
     data = request.get_json()
     
     if not data:
@@ -104,11 +252,17 @@ def request_document():
     
     document_id = data.get('documentId')
     
+    # Optional view parameters
+    hide_annotations_tools = data.get('hideAnnotationsTools', False)
+    hide_annotations = data.get('hideAnnotations', False)
+    hide_logo = data.get('hideLogo', False)
+    
     if not document_id:
         return jsonify({'success': False, 'error': 'Missing documentId'}), 400
     
     plugin_manager = current_app.config['PLUGIN_MANAGER']
     config = current_app.config['CONFIG']
+    jwt_handler = current_app.config['JWT_HANDLER']
     
     # Check if document exists
     if not plugin_manager.pdf_plugin.document_exists(document_id):
@@ -117,31 +271,133 @@ def request_document():
     # Generate temporary document ID
     temp_doc_id = f"temp_{uuid.uuid4().hex}"
     cache_duration = config.cache.get('duration_seconds', 3600)
-    expires_at = datetime.utcnow() + timedelta(seconds=cache_duration)
+    
+    # DAT validity: longer than cache to allow viewing
+    dat_duration = max(7200, cache_duration * 4)
+    dat_expires_at = datetime.utcnow() + timedelta(seconds=dat_duration)
     
     # Store temporary document mapping
     temp_documents[temp_doc_id] = {
         'document_id': document_id,
         'user': g.user['username'],
-        'expires_at': expires_at.isoformat() + 'Z',
+        'expires_at': dat_expires_at.isoformat() + 'Z',
         'created_at': datetime.utcnow().isoformat() + 'Z'
     }
     
-    # Cache the document asynchronously (simplified: sync for now)
-    cache_dir = config.cache.get('directory', './cache')
+    # Initialize download status
+    download_status[temp_doc_id] = 'pending'
+    
+    # Cache the document in background thread
+    cache_dir_config = config.cache.get('directory', './cache')
+    app_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    cache_dir = os.path.join(app_root, cache_dir_config.lstrip('./'))
     os.makedirs(cache_dir, exist_ok=True)
-    
     cache_path = os.path.join(cache_dir, f"{temp_doc_id}.pdf")
-    pdf_data = plugin_manager.pdf_plugin.get_document(document_id)
     
-    if pdf_data:
-        with open(cache_path, 'wb') as f:
-            f.write(pdf_data)
+    # Start background download
+    def download_pdf():
+        try:
+            download_status[temp_doc_id] = 'downloading'
+            pdf_data = plugin_manager.pdf_plugin.get_document(document_id)
+            
+            if pdf_data:
+                with open(cache_path, 'wb') as f:
+                    f.write(pdf_data)
+                download_status[temp_doc_id] = 'ready'
+            else:
+                download_status[temp_doc_id] = 'error'
+        except Exception as e:
+            print(f"Error downloading PDF {document_id}: {e}")
+            download_status[temp_doc_id] = 'error'
+    
+    thread = threading.Thread(target=download_pdf)
+    thread.daemon = True
+    thread.start()
+    
+    # Generate Document Access Token (DAT)
+    dat = jwt_handler.generate_document_token(
+        temp_document_id=temp_doc_id,
+        document_id=document_id,
+        username=g.user['username'],
+        expires_in_seconds=dat_duration,
+        hide_annotations_tools=hide_annotations_tools,
+        hide_annotations=hide_annotations,
+        hide_logo=hide_logo
+    )
     
     return jsonify({
         'success': True,
-        'tempDocumentId': temp_doc_id,
-        'expires_at': expires_at.isoformat() + 'Z'
+        'tempDocumentId': temp_doc_id,  # Legacy compatibility
+        'dat': dat,  # Document Access Token (recommended)
+        'expires_at': dat_expires_at.isoformat() + 'Z'
+    })
+
+
+@api_bp.route('/documentStatus/<temp_doc_id>', methods=['GET'])
+def get_document_status(temp_doc_id):
+    """Get the download status of a document.
+    
+    Supports both authentication methods:
+    - DAT (Document Access Token) in query parameter
+    - Bearer token in Authorization header (legacy)
+    
+    Returns status: 'pending', 'downloading', 'ready', 'error', or 'not_found'
+    """
+    jwt_handler = current_app.config['JWT_HANDLER']
+    plugin_manager = current_app.config['PLUGIN_MANAGER']
+    
+    # Check for DAT first
+    dat = request.args.get('dat')
+    username = None
+    
+    if dat:
+        # Validate DAT
+        dat_info = jwt_handler.validate_document_token(dat)
+        if dat_info and dat_info['temp_document_id'] == temp_doc_id:
+            username = dat_info['username']
+    
+    # Fallback to Bearer token (legacy)
+    if not username:
+        token = None
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+        
+        if token:
+            user = plugin_manager.auth_plugin.validate_token(token)
+            if user:
+                username = user['username']
+    
+    if not username:
+        return jsonify({
+            'success': False,
+            'status': 'unauthorized',
+            'error': 'Invalid or missing authentication'
+        }), 401
+    
+    if temp_doc_id not in temp_documents:
+        return jsonify({
+            'success': False,
+            'status': 'not_found',
+            'error': 'Document not found'
+        }), 404
+    
+    doc_info = temp_documents[temp_doc_id]
+    
+    # Check if user matches
+    if doc_info['user'] != username:
+        return jsonify({
+            'success': False,
+            'status': 'forbidden',
+            'error': 'Access denied'
+        }), 403
+    
+    status = download_status.get(temp_doc_id, 'pending')
+    
+    return jsonify({
+        'success': True,
+        'status': status,
+        'documentId': doc_info['document_id']
     })
 
 

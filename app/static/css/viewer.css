@@ -71,6 +71,23 @@
     border-color: var(--primary-color);
 }
 
+/* Save button unsaved state animation */
+@keyframes pulse-save {
+    0%, 100% {
+        background-color: transparent;
+        border-color: #555;
+    }
+    50% {
+        background-color: #ffc107;
+        border-color: #ffc107;
+        color: #000;
+    }
+}
+
+.toolbar-btn.unsaved {
+    animation: pulse-save 2s ease-in-out infinite;
+}
+
 .page-info {
     display: flex;
     align-items: center;
@@ -164,46 +181,113 @@
 .sidebar-content {
     flex: 1;
     overflow-y: auto;
-    padding: 15px;
+    padding: 10px;
 }
 
-.annotation-section {
-    margin-bottom: 20px;
+/* Pages Accordion */
+.pages-accordion {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
 }
 
-.annotation-section h4 {
-    font-size: 14px;
+.accordion-section {
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.accordion-section.active {
+    border-color: var(--primary-color);
+}
+
+.accordion-header {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    cursor: pointer;
+    background: #fafafa;
+    border-bottom: 1px solid transparent;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.accordion-header:hover {
+    background: #f0f0f0;
+}
+
+.accordion-section.active .accordion-header {
+    background: var(--primary-color);
+    color: white;
+    border-bottom-color: var(--border-color);
+}
+
+.accordion-icon {
+    font-size: 10px;
+    margin-right: 8px;
     color: var(--secondary-color);
-    margin-bottom: 10px;
+}
+
+.accordion-section.active .accordion-icon {
+    color: white;
+}
+
+.accordion-title {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.accordion-content {
+    padding: 10px;
+}
+
+.annotation-subsection {
+    margin-bottom: 12px;
+}
+
+.annotation-subsection:last-child {
+    margin-bottom: 0;
+}
+
+.subsection-title {
+    font-size: 12px;
+    color: var(--secondary-color);
+    margin-bottom: 8px;
+    font-weight: 500;
 }
 
 .annotation-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 6px;
 }
 
 .annotation-item {
-    background: white;
+    background: #f8f9fa;
     border: 1px solid var(--border-color);
     border-radius: 4px;
-    padding: 10px;
-    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     transition: all 0.2s ease;
+    position: relative;
 }
 
 .annotation-item:hover {
     border-color: var(--primary-color);
+    background: white;
 }
 
-.annotation-item .page-num {
-    font-size: 11px;
-    color: var(--secondary-color);
-    margin-bottom: 5px;
+.annotation-item-content {
+    flex: 1;
+    padding: 8px 10px;
+    cursor: pointer;
+    overflow: hidden;
 }
 
 .annotation-item .content {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--dark-color);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -212,6 +296,42 @@
 
 .annotation-item.highlight {
     border-left: 4px solid;
+}
+
+.annotation-delete-btn {
+    display: none;
+    width: 24px;
+    height: 24px;
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+    line-height: 1;
+    margin-right: 6px;
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+}
+
+.annotation-item:hover .annotation-delete-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.annotation-delete-btn:hover {
+    background: #c82333;
+    transform: scale(1.1);
+}
+
+.no-annotations {
+    color: #999;
+    font-size: 12px;
+    text-align: center;
+    padding: 10px;
+    margin: 0;
 }
 
 /* PDF Container */
@@ -252,6 +372,11 @@
     position: absolute;
     cursor: move;
     pointer-events: auto;
+}
+
+.note.dragging {
+    opacity: 0.7;
+    z-index: 100;
 }
 
 .note-icon {
@@ -302,6 +427,67 @@
 
 .highlight-rect:hover {
     opacity: 0.6;
+    cursor: move;
+}
+
+.highlight-move-icon {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 16px;
+    color: rgba(0, 0, 0, 0.6);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+    text-shadow: 0 0 2px white;
+}
+
+.highlight-rect:hover .highlight-move-icon {
+    opacity: 1;
+}
+
+.highlight-resize-handle {
+    position: absolute;
+    bottom: -4px;
+    right: -4px;
+    width: 12px;
+    height: 12px;
+    background: white;
+    border: 2px solid rgba(0, 0, 0, 0.5);
+    border-radius: 50%;
+    cursor: se-resize;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: auto;
+    z-index: 10;
+}
+
+.highlight-rect:hover .highlight-resize-handle {
+    opacity: 1;
+}
+
+.highlight-resize-handle:hover {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    transform: scale(1.2);
+}
+
+.highlight-rect.dragging {
+    opacity: 0.7;
+    cursor: grabbing;
+}
+
+/* Sidebar annotation flash animation */
+@keyframes flash-highlight {
+    0%, 100% { background-color: #f8f9fa; }
+    25% { background-color: #fff3cd; }
+    50% { background-color: #ffc107; }
+    75% { background-color: #fff3cd; }
+}
+
+.annotation-item.flash {
+    animation: flash-highlight 0.5s ease-in-out 3;
 }
 
 /* Note Editor */
@@ -390,4 +576,115 @@
     .viewer-sidebar.collapsed {
         left: -280px;
     }
+}
+
+/* Hide annotations tools mode */
+.hide-annotations-tools .annotation-delete-btn {
+    display: none !important;
+}
+
+.hide-annotations-tools .annotation-item:hover .annotation-delete-btn {
+    display: none !important;
+}
+
+/* Hide annotations mode - hide annotations layer */
+.hide-annotations .annotations-layer {
+    display: none !important;
+}
+
+/* Loading Overlay */
+.loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(82, 86, 89, 0.95);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+.loading-spinner {
+    width: 60px;
+    height: 60px;
+    border: 4px solid rgba(255, 255, 255, 0.2);
+    border-top-color: var(--primary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.loading-text {
+    color: white;
+    font-size: 18px;
+    margin-top: 20px;
+    font-weight: 500;
+}
+
+.loading-progress {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 14px;
+    margin-top: 10px;
+}
+
+/* Error Overlay */
+.error-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(82, 86, 89, 0.98);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 20px;
+    text-align: center;
+}
+
+.error-icon {
+    font-size: 64px;
+    margin-bottom: 20px;
+}
+
+.error-title {
+    color: white;
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 15px;
+}
+
+.error-message {
+    font-size: 16px;
+    max-width: 500px;
+    line-height: 1.5;
+    margin-bottom: 30px;
+}
+
+.error-overlay .btn {
+    margin: 5px;
+}
+
+.error-overlay .btn-outline {
+    color: white;
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.error-overlay .btn-outline:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* Page wrapper transition */
+.pdf-page-wrapper {
+    transition: opacity 0.3s ease;
 }

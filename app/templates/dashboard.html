@@ -25,21 +25,180 @@
             <p>Open PDF documents with annotation capabilities</p>
         </div>
         
-        <div class="card">
-            <h2>Open a Document</h2>
-            <form id="openDocumentForm" class="document-form">
-                <div class="form-group">
-                    <label for="documentId">Document ID</label>
-                    <input type="text" id="documentId" name="documentId" required
-                           placeholder="Enter document ID (e.g., sample)">
+        <div class="document-section">
+            <div class="card document-form-card">
+                <h2>Open a Document</h2>
+                <form id="openDocumentForm" class="document-form">
+                    <div class="form-group">
+                        <label for="documentId">Document ID</label>
+                        <input type="text" id="documentId" name="documentId" required
+                               placeholder="Enter document ID (e.g., sample)">
+                    </div>
+                    
+                    <div class="form-group checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="hideAnnotationsTools" name="hideAnnotationsTools">
+                            <span>Hide Annotations Tools</span>
+                            <small>Hide note/highlight tools in the toolbar (read-only mode)</small>
+                        </label>
+                    </div>
+                    
+                    <div class="form-group checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="hideAnnotations" name="hideAnnotations">
+                            <span>Hide Annotations</span>
+                            <small>Hide existing annotations on the document</small>
+                        </label>
+                    </div>
+                    
+                    <div class="form-group checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="hideLogo" name="hideLogo">
+                            <span>Hide Logo</span>
+                            <small>Hide the OpenMark logo in the toolbar</small>
+                        </label>
+                    </div>
+                    
+                    <div id="errorMessage" class="error-message" style="display: none;"></div>
+                    
+                    <button type="submit" class="btn btn-primary">
+                        Open Document
+                    </button>
+                </form>
+            </div>
+            
+            <div class="card url-preview-card api-documentation">
+                <h2>🔗 API Integration Guide</h2>
+                <p class="url-preview-description">Two methods to integrate PDF viewing in your application. Both use <strong>Document Access Token (DAT)</strong> for secure, refresh-resistant access.</p>
+                
+                <!-- DAT Info Box -->
+                <div class="dat-info-box">
+                    <h4>🔐 Document Access Token (DAT)</h4>
+                    <p>The DAT is a self-contained JWT that includes all necessary information to access a document. Benefits:</p>
+                    <ul>
+                        <li>✅ Page refresh (F5) works without losing access</li>
+                        <li>✅ Valid for 2 hours (configurable)</li>
+                        <li>✅ Single token contains user, document, and view options</li>
+                        <li>✅ No need to validate auth token on each request</li>
+                    </ul>
                 </div>
                 
-                <div id="errorMessage" class="error-message" style="display: none;"></div>
+                <!-- Method 1: Traditional 3-step -->
+                <div class="api-method">
+                    <div class="api-method-header">
+                        <h3>📋 Method 1: Three-Step Process</h3>
+                        <span class="api-method-badge">Standard</span>
+                    </div>
+                    
+                    <div class="api-steps">
+                        <div class="api-step">
+                            <div class="step-number">1</div>
+                            <div class="step-content">
+                                <div class="step-title">Authenticate</div>
+                                <code class="step-endpoint">POST /api/authenticate</code>
+                                <div class="step-params">
+                                    <span class="param">username</span> = <em>&lt;user identifier&gt;</em><br>
+                                    <span class="param">password</span> = <em>&lt;user password&gt;</em>
+                                </div>
+                                <div class="step-result">→ Returns: <code>token</code></div>
+                            </div>
+                        </div>
+                        
+                        <div class="api-step">
+                            <div class="step-number">2</div>
+                            <div class="step-content">
+                                <div class="step-title">Request Document</div>
+                                <code class="step-endpoint">POST /api/requestDocument</code>
+                                <div class="step-params">
+                                    <span class="param">documentId</span> = <em>&lt;PDF document ID&gt;</em><br>
+                                    <span class="param">Authorization</span> = Bearer <em>&lt;token from step 1&gt;</em><br>
+                                    <span class="param optional">hideAnnotationsTools</span> = <em>true/false</em> (optional)<br>
+                                    <span class="param optional">hideAnnotations</span> = <em>true/false</em> (optional)<br>
+                                    <span class="param optional">hideLogo</span> = <em>true/false</em> (optional)
+                                </div>
+                                <div class="step-result">→ Returns: <code>dat</code> (Document Access Token), <code>tempDocumentId</code></div>
+                            </div>
+                        </div>
+                        
+                        <div class="api-step">
+                            <div class="step-number">3</div>
+                            <div class="step-content">
+                                <div class="step-title">View Document</div>
+                                <code class="step-endpoint">GET /api/viewDocument</code>
+                                <div class="step-params">
+                                    <span class="param">dat</span> = <em>&lt;Document Access Token from step 2&gt;</em>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="url-preview-container">
+                        <label>Final URL (Method 1)</label>
+                        <div class="url-display">
+                            <code id="method1Url">/api/viewDocument?dat=&lt;Document Access Token&gt;</code>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-outline btn-sm copy-url-btn" data-target="method1Url">
+                        📋 Copy URL
+                    </button>
+                    <span class="copy-success" style="display: none;">✓ Copied!</span>
+                </div>
                 
-                <button type="submit" class="btn btn-primary">
-                    Open Document
-                </button>
-            </form>
+                <!-- Method 2: QuickView -->
+                <div class="api-method api-method-highlight">
+                    <div class="api-method-header">
+                        <h3>⚡ Method 2: Quick View (Single Call)</h3>
+                        <span class="api-method-badge recommended">Direct</span>
+                    </div>
+                    
+                    <div class="api-steps">
+                        <div class="api-step">
+                            <div class="step-number">1</div>
+                            <div class="step-content">
+                                <div class="step-title">Authenticate + Request + Get URL</div>
+                                <code class="step-endpoint">POST /api/quickView</code>
+                                <div class="step-params">
+                                    <span class="param">username</span> = <em>&lt;user identifier&gt;</em><br>
+                                    <span class="param">password</span> = <em>&lt;user password&gt;</em><br>
+                                    <span class="param">documentId</span> = <em>&lt;PDF document ID&gt;</em><br>
+                                    <span class="param optional">hideAnnotationsTools</span> = <em>true/false</em> (optional)<br>
+                                    <span class="param optional">hideAnnotations</span> = <em>true/false</em> (optional)<br>
+                                    <span class="param optional">hideLogo</span> = <em>true/false</em> (optional)
+                                </div>
+                                <div class="step-result">→ Returns: <code>viewUrl</code>, <code>dat</code> (Document Access Token), <code>tempDocumentId</code></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="url-preview-container">
+                        <label>Returned URL (Method 2)</label>
+                        <div class="url-display">
+                            <code id="method2Url">/api/viewDocument?dat=&lt;Document Access Token&gt;</code>
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-outline btn-sm copy-url-btn" data-target="method2Url">
+                        📋 Copy URL
+                    </button>
+                    <span class="copy-success" style="display: none;">✓ Copied!</span>
+                </div>
+                
+                <!-- Live Preview Section -->
+                <div class="live-preview-section">
+                    <h4>🔄 Live Preview (with current form values)</h4>
+                    <p class="small-text">Based on the Document ID and options selected on the left.</p>
+                    
+                    <div class="url-preview-container">
+                        <label>Generated View URL</label>
+                        <div class="url-display url-display-live">
+                            <code id="generatedUrl">Enter a document ID to generate URL</code>
+                        </div>
+                    </div>
+                    <button type="button" id="copyUrlBtn" class="btn btn-primary btn-sm" disabled>
+                        📋 Copy Live URL
+                    </button>
+                    <span id="copySuccess" class="copy-success" style="display: none;">✓ Copied!</span>
+                </div>
+            </div>
         </div>
         
         <div class="card">
