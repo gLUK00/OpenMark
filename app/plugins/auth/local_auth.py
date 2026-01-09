@@ -1,17 +1,22 @@
-"""Local file-based authentication plugin."""
+"""Local file-based authentication plugin with JWT tokens."""
 
 import json
 import os
 import hashlib
-import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
 from app.plugins.base import AuthenticationPlugin
+from app.jwt_handler import get_jwt_handler
 
 
 class LocalAuthPlugin(AuthenticationPlugin):
-    """Authentication plugin using local JSON file for user storage."""
+    """Authentication plugin using local JSON file for user storage with JWT tokens.
+    
+    This plugin uses stateless JWT tokens for authentication, eliminating
+    the need for server-side token storage. The user database is still
+    stored in a local JSON file.
+    """
     
     def __init__(self, config: dict):
         """Initialize the local authentication plugin.
@@ -23,7 +28,6 @@ class LocalAuthPlugin(AuthenticationPlugin):
         self.users_file = config.get('users_file', './data/users.json')
         self.token_expiry_hours = config.get('token_expiry_hours', 24)
         self._users = self._load_users()
-        self._active_tokens = {}
     
     def _load_users(self) -> dict:
         """Load users from JSON file.
@@ -76,23 +80,15 @@ class LocalAuthPlugin(AuthenticationPlugin):
         """
         return hashlib.sha256(password.encode()).hexdigest()
     
-    def _generate_token(self) -> str:
-        """Generate a secure random token.
-        
-        Returns:
-            Random token string
-        """
-        return secrets.token_urlsafe(32)
-    
     def authenticate(self, username: str, password: str) -> Optional[dict]:
-        """Authenticate a user.
+        """Authenticate a user and return a JWT token.
         
         Args:
             username: The username
             password: The password
             
         Returns:
-            Dict with 'token' and 'expires_at' if successful, None otherwise
+            Dict with 'token' (JWT) and 'expires_at' if successful, None otherwise
         """
         user = self._users.get(username)
         
@@ -104,39 +100,33 @@ class LocalAuthPlugin(AuthenticationPlugin):
         if user['password_hash'] != password_hash:
             return None
         
-        # Generate token
-        token = self._generate_token()
-        expires_at = datetime.utcnow() + timedelta(hours=self.token_expiry_hours)
+        # Generate JWT token using the global JWT handler
+        jwt_handler = get_jwt_handler()
+        if not jwt_handler:
+            raise RuntimeError("JWT handler not initialized")
         
-        # Store token
-        self._active_tokens[token] = {
-            'username': username,
-            'role': user.get('role', 'user'),
-            'expires_at': expires_at
-        }
-        
-        return {
-            'token': token,
-            'expires_at': expires_at.isoformat() + 'Z'
-        }
+        return jwt_handler.generate_auth_token(
+            username=username,
+            role=user.get('role', 'user'),
+            expires_in_hours=self.token_expiry_hours
+        )
     
     def validate_token(self, token: str) -> Optional[dict]:
-        """Validate an authentication token.
+        """Validate a JWT authentication token.
         
         Args:
-            token: The authentication token
+            token: The JWT authentication token
             
         Returns:
-            User dict if valid, None otherwise
+            User dict with 'username' and 'role' if valid, None otherwise
         """
-        token_data = self._active_tokens.get(token)
-        
-        if not token_data:
+        jwt_handler = get_jwt_handler()
+        if not jwt_handler:
             return None
         
-        # Check expiration
-        if datetime.utcnow() > token_data['expires_at']:
-            del self._active_tokens[token]
+        token_data = jwt_handler.validate_auth_token(token)
+        
+        if not token_data:
             return None
         
         return {
@@ -145,15 +135,16 @@ class LocalAuthPlugin(AuthenticationPlugin):
         }
     
     def invalidate_token(self, token: str) -> bool:
-        """Invalidate an authentication token.
+        """Invalidate a JWT authentication token (revoke it).
         
         Args:
-            token: The authentication token
+            token: The JWT authentication token
             
         Returns:
             True if successful, False otherwise
         """
-        if token in self._active_tokens:
-            del self._active_tokens[token]
-            return True
-        return False
+        jwt_handler = get_jwt_handler()
+        if not jwt_handler:
+            return False
+        
+        return jwt_handler.revoke_token(token)

@@ -7,7 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
     FLASK_APP=app \
-    FLASK_ENV=production
+    FLASK_ENV=production \
+    OPENMARK_CUSTOM_PLUGINS_DIR=/app/custom_plugins
 
 # Set work directory
 WORKDIR /app
@@ -28,8 +29,8 @@ COPY . ./
 RUN chgrp -R 0 /app && \
     chmod -R g=u /app
 
-# Create necessary directories
-RUN mkdir -p /app/cache /app/data/pdfs
+# Create necessary directories (including custom plugins)
+RUN mkdir -p /app/cache /app/data/pdfs /app/custom_plugins/auth /app/custom_plugins/pdf_source /app/custom_plugins/annotations
 
 # Expose port
 EXPOSE 8080

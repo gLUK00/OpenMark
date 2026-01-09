@@ -1,24 +1,24 @@
-"""JWT Handler for Document Access Tokens (DAT).
+"""JWT Handler for Authentication and Document Access Tokens.
 
-This module provides functionality to generate and validate JWT tokens
-for secure document access. The Document Access Token (DAT) is a self-contained
-token that includes all necessary information to access a specific document
-without requiring additional authentication validation.
+This module provides functionality to generate and validate JWT tokens for:
+1. Authentication Tokens (AT): Used for API authentication after login
+2. Document Access Tokens (DAT): Used for secure document access
 
-Benefits:
-- Self-contained: No need to validate auth token on every request
-- Refresh-resistant: F5/page refresh works as long as DAT is valid
+All tokens are JWT-based, providing:
+- Self-contained: No need for server-side token storage
+- Stateless: Enables horizontal scaling without session synchronization
 - Secure: Cryptographically signed with server secret
-- Configurable expiration: Longer validity than cache duration
+- Configurable expiration: Different validity for auth and document access
+- Revocation support: Via token blacklist for logout
 """
 
 import jwt
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Set
 
 
 class JWTHandler:
-    """Handler for Document Access Tokens (DAT)."""
+    """Handler for JWT-based Authentication and Document Access Tokens."""
     
     def __init__(self, secret_key: str, algorithm: str = 'HS256'):
         """Initialize the JWT handler.
@@ -29,6 +29,127 @@ class JWTHandler:
         """
         self.secret_key = secret_key
         self.algorithm = algorithm
+        # Blacklist for revoked tokens (for logout functionality)
+        self._revoked_tokens: Set[str] = set()
+    
+    def generate_auth_token(
+        self,
+        username: str,
+        role: str = 'user',
+        expires_in_hours: int = 24,
+        extra_claims: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Generate a JWT Authentication Token (AT).
+        
+        Args:
+            username: The authenticated username
+            role: User role (default: 'user')
+            expires_in_hours: Token validity duration in hours (default: 24)
+            extra_claims: Additional claims to include in the token
+            
+        Returns:
+            Dict with 'token' and 'expires_at' keys
+        """
+        now = datetime.utcnow()
+        expires_at = now + timedelta(hours=expires_in_hours)
+        
+        payload = {
+            # Standard JWT claims
+            'iat': now,  # Issued at
+            'exp': expires_at,  # Expiration
+            'nbf': now,  # Not valid before
+            
+            # User claims
+            'sub': username,  # Subject (user)
+            'role': role,  # User role
+            
+            # Token type identifier
+            'type': 'at'  # Authentication Token
+        }
+        
+        # Add extra claims if provided
+        if extra_claims:
+            payload.update(extra_claims)
+        
+        token = jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+        
+        return {
+            'token': token,
+            'expires_at': expires_at.isoformat() + 'Z'
+        }
+    
+    def validate_auth_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """Validate a JWT Authentication Token (AT).
+        
+        Args:
+            token: The JWT token to validate
+            
+        Returns:
+            Dict with user info if valid, None otherwise
+        """
+        # Check if token is revoked
+        if token in self._revoked_tokens:
+            return None
+        
+        try:
+            payload = jwt.decode(
+                token,
+                self.secret_key,
+                algorithms=[self.algorithm]
+            )
+            
+            # Verify it's an Authentication Token
+            if payload.get('type') != 'at':
+                return None
+            
+            return {
+                'username': payload.get('sub'),
+                'role': payload.get('role', 'user'),
+                'expires_at': datetime.utcfromtimestamp(payload.get('exp')),
+                'issued_at': datetime.utcfromtimestamp(payload.get('iat'))
+            }
+            
+        except jwt.ExpiredSignatureError:
+            return None
+        except jwt.InvalidTokenError:
+            return None
+    
+    def revoke_token(self, token: str) -> bool:
+        """Revoke a JWT token (for logout).
+        
+        Note: In production, use Redis or database for distributed revocation.
+        
+        Args:
+            token: The JWT token to revoke
+            
+        Returns:
+            True if successful
+        """
+        self._revoked_tokens.add(token)
+        return True
+    
+    def is_token_revoked(self, token: str) -> bool:
+        """Check if a token has been revoked.
+        
+        Args:
+            token: The JWT token to check
+            
+        Returns:
+            True if revoked, False otherwise
+        """
+        return token in self._revoked_tokens
+    
+    def cleanup_revoked_tokens(self):
+        """Remove expired tokens from the revocation list.
+        
+        Call this periodically to prevent memory growth.
+        """
+        valid_revoked = set()
+        for token in self._revoked_tokens:
+            expiry = self.get_token_expiry(token)
+            if expiry and expiry > datetime.utcnow():
+                valid_revoked.add(token)
+        self._revoked_tokens = valid_revoked
     
     def generate_document_token(
         self,

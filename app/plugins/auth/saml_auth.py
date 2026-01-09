@@ -1,4 +1,4 @@
-"""SAML SSO authentication plugin."""
+"""SAML SSO authentication plugin with JWT tokens."""
 
 import secrets
 import base64
@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 import xml.etree.ElementTree as ET
 
 from app.plugins.base import AuthenticationPlugin
+from app.jwt_handler import get_jwt_handler
 
 # Try to import optional SAML libraries
 try:
@@ -20,12 +21,13 @@ except ImportError:
 
 
 class SAMLAuthPlugin(AuthenticationPlugin):
-    """Authentication plugin using SAML 2.0 for Single Sign-On (SSO).
+    """Authentication plugin using SAML 2.0 for Single Sign-On (SSO) with JWT tokens.
     
     This plugin supports two modes:
     1. Full SAML with python3-saml library (recommended for production)
     2. Basic SAML without external dependencies (limited features)
     
+    Uses stateless JWT tokens for session management after SAML authentication.
     For full SAML support, install: pip install python3-saml
     """
     
@@ -71,8 +73,6 @@ class SAMLAuthPlugin(AuthenticationPlugin):
         self.role_attribute = config.get('role_attribute')
         self.role_mapping = config.get('role_mapping', {})
         
-        # Active tokens storage
-        self._active_tokens = {}
         # SAML request IDs for validation
         self._saml_requests = {}
         
@@ -281,24 +281,23 @@ class SAMLAuthPlugin(AuthenticationPlugin):
                             role = self.role_mapping.get(idp_role, self.default_role)
                             break
             
-            # Generate OpenMark token
-            token = secrets.token_urlsafe(32)
-            expires_at = datetime.utcnow() + timedelta(hours=self.token_expiry_hours)
+            # Generate JWT token using the global JWT handler
+            jwt_handler = get_jwt_handler()
+            if not jwt_handler:
+                raise RuntimeError("JWT handler not initialized")
             
-            # Store token
-            self._active_tokens[token] = {
-                'username': username,
-                'role': role,
-                'expires_at': expires_at,
-                'saml_session': True
-            }
+            result = jwt_handler.generate_auth_token(
+                username=username,
+                role=role,
+                expires_in_hours=self.token_expiry_hours,
+                extra_claims={
+                    'saml_session': True
+                }
+            )
             
-            return {
-                'token': token,
-                'expires_at': expires_at.isoformat() + 'Z',
-                'username': username,
-                'relay_state': relay_state
-            }
+            result['username'] = username
+            result['relay_state'] = relay_state
+            return result
             
         except (ET.ParseError, ValueError, TypeError):
             return None
@@ -332,22 +331,21 @@ class SAMLAuthPlugin(AuthenticationPlugin):
         }
     
     def validate_token(self, token: str) -> Optional[dict]:
-        """Validate an authentication token.
+        """Validate a JWT authentication token.
         
         Args:
-            token: The authentication token
+            token: The JWT authentication token
             
         Returns:
-            User dict if valid, None otherwise
+            User dict with 'username' and 'role' if valid, None otherwise
         """
-        token_data = self._active_tokens.get(token)
-        
-        if not token_data:
+        jwt_handler = get_jwt_handler()
+        if not jwt_handler:
             return None
         
-        # Check expiration
-        if datetime.utcnow() > token_data['expires_at']:
-            del self._active_tokens[token]
+        token_data = jwt_handler.validate_auth_token(token)
+        
+        if not token_data:
             return None
         
         return {
@@ -356,18 +354,19 @@ class SAMLAuthPlugin(AuthenticationPlugin):
         }
     
     def invalidate_token(self, token: str) -> bool:
-        """Invalidate an authentication token.
+        """Invalidate a JWT authentication token (revoke it).
         
         Args:
-            token: The authentication token
+            token: The JWT authentication token
             
         Returns:
             True if successful, False otherwise
         """
-        if token in self._active_tokens:
-            del self._active_tokens[token]
-            return True
-        return False
+        jwt_handler = get_jwt_handler()
+        if not jwt_handler:
+            return False
+        
+        return jwt_handler.revoke_token(token)
     
     def get_metadata(self) -> str:
         """Generate SP metadata XML for IdP configuration.

@@ -12,6 +12,14 @@ gunicorn==23.0.0
 # pip install psycopg2-binary
 psycopg2-binary==2.9.9
 
+# Optional: S3 PDF source plugin
+# pip install boto3
+boto3==1.34.0
+
+# Optional: SFTP PDF source plugin
+# pip install paramiko
+paramiko==3.4.0
+
 # Optional: SAML SSO authentication plugin
 # pip install python3-saml
 # python3-saml==1.16.0

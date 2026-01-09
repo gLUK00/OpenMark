@@ -1,11 +1,11 @@
-"""PostgreSQL authentication plugin."""
+"""PostgreSQL authentication plugin with JWT tokens."""
 
-import secrets
 import hashlib
 from datetime import datetime, timedelta
 from typing import Optional
 
 from app.plugins.base import AuthenticationPlugin
+from app.jwt_handler import get_jwt_handler
 
 # Try to import psycopg2
 try:
@@ -18,13 +18,13 @@ except ImportError:
 
 
 class PostgreSQLAuthPlugin(AuthenticationPlugin):
-    """Authentication plugin using PostgreSQL for user storage.
+    """Authentication plugin using PostgreSQL for user storage with JWT tokens.
     
     Requires: pip install psycopg2-binary
     
-    This plugin stores users and active sessions in PostgreSQL tables,
-    providing robust, ACID-compliant authentication with support for
-    multiple application instances through connection pooling.
+    This plugin stores users in PostgreSQL and uses stateless JWT tokens
+    for authentication. Token revocation is tracked in PostgreSQL for
+    logout functionality across distributed instances.
     """
     
     # SQL statements for table creation
@@ -41,23 +41,18 @@ class PostgreSQLAuthPlugin(AuthenticationPlugin):
         )
     '''
     
-    CREATE_TOKENS_TABLE = '''
-        CREATE TABLE IF NOT EXISTS {tokens_table} (
+    CREATE_REVOKED_TOKENS_TABLE = '''
+        CREATE TABLE IF NOT EXISTS {revoked_tokens_table} (
             id SERIAL PRIMARY KEY,
-            token VARCHAR(255) UNIQUE NOT NULL,
-            username VARCHAR(255) NOT NULL REFERENCES {users_table}(username) ON DELETE CASCADE,
-            role VARCHAR(50) DEFAULT 'user',
+            token_hash VARCHAR(64) UNIQUE NOT NULL,
             expires_at TIMESTAMP NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            ip_address VARCHAR(45),
-            user_agent TEXT
+            revoked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     '''
     
     CREATE_INDEXES = '''
-        CREATE INDEX IF NOT EXISTS idx_{tokens_table}_token ON {tokens_table}(token);
-        CREATE INDEX IF NOT EXISTS idx_{tokens_table}_username ON {tokens_table}(username);
-        CREATE INDEX IF NOT EXISTS idx_{tokens_table}_expires ON {tokens_table}(expires_at);
+        CREATE INDEX IF NOT EXISTS idx_{revoked_tokens_table}_token_hash ON {revoked_tokens_table}(token_hash);
+        CREATE INDEX IF NOT EXISTS idx_{revoked_tokens_table}_expires ON {revoked_tokens_table}(expires_at);
         CREATE INDEX IF NOT EXISTS idx_{users_table}_username ON {users_table}(username);
         CREATE INDEX IF NOT EXISTS idx_{users_table}_email ON {users_table}(email);
     '''
@@ -100,7 +95,7 @@ class PostgreSQLAuthPlugin(AuthenticationPlugin):
         
         # Table names
         self.users_table = config.get('users_table', 'auth_users')
-        self.tokens_table = config.get('tokens_table', 'auth_tokens')
+        self.revoked_tokens_table = config.get('revoked_tokens_table', 'revoked_tokens')
         
         # Token configuration
         self.token_expiry_hours = config.get('token_expiry_hours', 24)
@@ -160,16 +155,15 @@ class PostgreSQLAuthPlugin(AuthenticationPlugin):
                     users_table=self.users_table
                 ))
                 
-                # Create tokens table
-                cur.execute(self.CREATE_TOKENS_TABLE.format(
-                    tokens_table=self.tokens_table,
-                    users_table=self.users_table
+                # Create revoked tokens table for JWT blacklist
+                cur.execute(self.CREATE_REVOKED_TOKENS_TABLE.format(
+                    revoked_tokens_table=self.revoked_tokens_table
                 ))
                 
                 # Create indexes
                 for statement in self.CREATE_INDEXES.format(
                     users_table=self.users_table,
-                    tokens_table=self.tokens_table
+                    revoked_tokens_table=self.revoked_tokens_table
                 ).split(';'):
                     if statement.strip():
                         cur.execute(statement)
@@ -211,36 +205,62 @@ class PostgreSQLAuthPlugin(AuthenticationPlugin):
         """
         return hashlib.sha256(password.encode()).hexdigest()
     
-    def _generate_token(self) -> str:
-        """Generate a secure random token.
+    def _hash_token(self, token: str) -> str:
+        """Hash a token for storage in revocation list.
         
+        Args:
+            token: JWT token to hash
+            
         Returns:
-            Random token string
+            Hashed token
         """
-        return secrets.token_urlsafe(32)
+        return hashlib.sha256(token.encode()).hexdigest()
     
-    def _cleanup_expired_tokens(self, cursor):
-        """Remove expired tokens from the database."""
+    def _cleanup_expired_revoked_tokens(self, cursor):
+        """Remove expired tokens from the revocation list."""
         cursor.execute(
-            f"DELETE FROM {self.tokens_table} WHERE expires_at < %s",
+            f"DELETE FROM {self.revoked_tokens_table} WHERE expires_at < %s",
             (datetime.utcnow(),)
         )
     
+    def _is_token_revoked(self, token: str) -> bool:
+        """Check if a token has been revoked.
+        
+        Args:
+            token: JWT token to check
+            
+        Returns:
+            True if revoked, False otherwise
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                token_hash = self._hash_token(token)
+                cur.execute(
+                    f"SELECT 1 FROM {self.revoked_tokens_table} WHERE token_hash = %s",
+                    (token_hash,)
+                )
+                return cur.fetchone() is not None
+        except psycopg2.Error:
+            return False
+        finally:
+            self._put_connection(conn)
+    
     def authenticate(self, username: str, password: str) -> Optional[dict]:
-        """Authenticate a user.
+        """Authenticate a user and return a JWT token.
         
         Args:
             username: The username
             password: The password
             
         Returns:
-            Dict with 'token' and 'expires_at' if successful, None otherwise
+            Dict with 'token' (JWT) and 'expires_at' if successful, None otherwise
         """
         conn = self._get_connection()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # Cleanup expired tokens periodically
-                self._cleanup_expired_tokens(cur)
+                # Cleanup expired revoked tokens periodically
+                self._cleanup_expired_revoked_tokens(cur)
                 
                 # Find user
                 cur.execute(
@@ -261,24 +281,18 @@ class PostgreSQLAuthPlugin(AuthenticationPlugin):
                     conn.commit()
                     return None
                 
-                # Generate token
-                token = self._generate_token()
-                expires_at = datetime.utcnow() + timedelta(hours=self.token_expiry_hours)
-                
-                # Store token
-                cur.execute(
-                    f'''INSERT INTO {self.tokens_table} 
-                        (token, username, role, expires_at) 
-                        VALUES (%s, %s, %s, %s)''',
-                    (token, username, user['role'], expires_at)
-                )
-                
                 conn.commit()
                 
-                return {
-                    'token': token,
-                    'expires_at': expires_at.isoformat() + 'Z'
-                }
+                # Generate JWT token using the global JWT handler
+                jwt_handler = get_jwt_handler()
+                if not jwt_handler:
+                    raise RuntimeError("JWT handler not initialized")
+                
+                return jwt_handler.generate_auth_token(
+                    username=username,
+                    role=user['role'],
+                    expires_in_hours=self.token_expiry_hours
+                )
                 
         except psycopg2.Error:
             conn.rollback()
@@ -287,57 +301,65 @@ class PostgreSQLAuthPlugin(AuthenticationPlugin):
             self._put_connection(conn)
     
     def validate_token(self, token: str) -> Optional[dict]:
-        """Validate an authentication token.
+        """Validate a JWT authentication token.
         
         Args:
-            token: The authentication token
+            token: The JWT authentication token
             
         Returns:
-            User dict if valid, None otherwise
+            User dict with 'username' and 'role' if valid, None otherwise
         """
-        conn = self._get_connection()
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    f'''SELECT username, role 
-                        FROM {self.tokens_table} 
-                        WHERE token = %s AND expires_at > %s''',
-                    (token, datetime.utcnow())
-                )
-                token_data = cur.fetchone()
-                
-                if not token_data:
-                    return None
-                
-                return {
-                    'username': token_data['username'],
-                    'role': token_data['role']
-                }
-                
-        except psycopg2.Error:
+        # Check if token is revoked in PostgreSQL
+        if self._is_token_revoked(token):
             return None
-        finally:
-            self._put_connection(conn)
+        
+        jwt_handler = get_jwt_handler()
+        if not jwt_handler:
+            return None
+        
+        token_data = jwt_handler.validate_auth_token(token)
+        
+        if not token_data:
+            return None
+        
+        return {
+            'username': token_data['username'],
+            'role': token_data['role']
+        }
     
     def invalidate_token(self, token: str) -> bool:
-        """Invalidate an authentication token.
+        """Invalidate a JWT authentication token (revoke it).
+        
+        Stores the token hash in PostgreSQL for distributed revocation.
         
         Args:
-            token: The authentication token
+            token: The JWT authentication token
             
         Returns:
             True if successful, False otherwise
         """
+        jwt_handler = get_jwt_handler()
+        if not jwt_handler:
+            return False
+        
+        # Get token expiry for cleanup
+        expiry = jwt_handler.get_token_expiry(token)
+        if not expiry:
+            return False
+        
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
+                token_hash = self._hash_token(token)
                 cur.execute(
-                    f"DELETE FROM {self.tokens_table} WHERE token = %s",
-                    (token,)
+                    f'''INSERT INTO {self.revoked_tokens_table} 
+                        (token_hash, expires_at) 
+                        VALUES (%s, %s)
+                        ON CONFLICT (token_hash) DO NOTHING''',
+                    (token_hash, expiry)
                 )
-                deleted = cur.rowcount > 0
                 conn.commit()
-                return deleted
+                return True
                 
         except psycopg2.Error:
             conn.rollback()

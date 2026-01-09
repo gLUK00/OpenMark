@@ -127,7 +127,7 @@ graph LR
             subgraph "Plugin System"
                 direction TB
                 AP[Auth Plugins<br/>• Local JSON<br/>• OAuth 2.0<br/>• SAML SSO<br/>• MongoDB<br/>• PostgreSQL]
-                PP[PDF Source Plugins<br/>• HTTP/HTTPS]
+                PP[PDF Source Plugins<br/>• HTTP/HTTPS<br/>• AWS S3<br/>• Local Filesystem<br/>• WebDAV<br/>• FTP/FTPS<br/>• SFTP<br/>• CMIS]
                 NP[Annotations Plugins<br/>• Local JSON<br/>• MongoDB<br/>• PostgreSQL]
             end
         end
@@ -332,7 +332,7 @@ sequenceDiagram
 
 ```html
 <!-- On your external application -->
-<!-- Using DAT (recommended - survives page refresh) -->
+<!-- Using DAT (JWT Document Access Token) -->
 <iframe 
   src="https://openmark-server.com/api/viewDocument?dat=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
   width="100%" 
@@ -340,16 +340,9 @@ sequenceDiagram
   frameborder="0"
   allow="fullscreen">
 </iframe>
-
-<!-- Legacy method (will lose access on page refresh) -->
-<iframe 
-  src="https://openmark-server.com/api/viewDocument?tempDocumentId=temp_abc123&token=xyz&hideLogo=true"
-  width="100%" 
-  height="800"
-  frameborder="0"
-  allow="fullscreen">
-</iframe>
 ```
+
+> **Note:** All authentication uses JWT tokens. The DAT (Document Access Token) is a self-contained JWT that includes user permissions and document access rights.
 
 ### Plugin Configurations
 
@@ -649,6 +642,787 @@ Store users and sessions in PostgreSQL for robust, ACID-compliant authentication
 }
 ```
 
+#### S3 PDF Source Plugin
+
+Retrieve PDF documents from an AWS S3 bucket or any S3-compatible storage service (MinIO, LocalStack, DigitalOcean Spaces, etc.).
+
+**Requirements:** `pip install boto3`
+
+**Basic configuration with explicit credentials:**
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "s3",
+      "config": {
+        "bucket_name": "my-pdf-bucket",
+        "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
+        "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        "region_name": "eu-west-1",
+        "prefix": "documents/"
+      }
+    }
+  }
+}
+```
+
+**Configuration using IAM roles (recommended for AWS):**
+
+When running on EC2, ECS, or Lambda with an attached IAM role, credentials are automatically retrieved:
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "s3",
+      "config": {
+        "bucket_name": "my-pdf-bucket",
+        "region_name": "eu-west-1",
+        "prefix": "documents/"
+      }
+    }
+  }
+}
+```
+
+**Configuration for S3-compatible services (MinIO, LocalStack):**
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "s3",
+      "config": {
+        "bucket_name": "my-pdf-bucket",
+        "aws_access_key_id": "minioadmin",
+        "aws_secret_access_key": "minioadmin",
+        "endpoint_url": "http://localhost:9000",
+        "region_name": "us-east-1",
+        "use_ssl": false,
+        "verify_ssl": false
+      }
+    }
+  }
+}
+```
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `bucket_name` | string | Yes | - | Name of the S3 bucket containing PDFs |
+| `aws_access_key_id` | string | No* | - | AWS access key ID (*optional if using IAM roles) |
+| `aws_secret_access_key` | string | No* | - | AWS secret access key (*optional if using IAM roles) |
+| `aws_session_token` | string | No | - | Session token for temporary credentials |
+| `region_name` | string | No | us-east-1 | AWS region where the bucket is located |
+| `prefix` | string | No | - | Key prefix for documents (e.g., `documents/` or `pdfs/2024/`) |
+| `endpoint_url` | string | No | - | Custom S3 endpoint URL for S3-compatible services |
+| `use_ssl` | boolean | No | true | Use SSL/TLS for connections |
+| `verify_ssl` | boolean | No | true | Verify SSL certificates |
+
+**S3 Key Structure:**
+
+Documents are retrieved using the pattern: `{prefix}/{document_id}.pdf`
+
+| Configuration | Document ID | S3 Key |
+|---------------|-------------|--------|
+| `prefix: ""` | `invoice_001` | `invoice_001.pdf` |
+| `prefix: "documents/"` | `invoice_001` | `documents/invoice_001.pdf` |
+| `prefix: "pdfs/2024/"` | `report` | `pdfs/2024/report.pdf` |
+
+**IAM Policy Example:**
+
+Minimum required permissions for the S3 bucket:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:HeadObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::my-pdf-bucket",
+        "arn:aws:s3:::my-pdf-bucket/*"
+      ]
+    }
+  ]
+}
+```
+
+**Features:**
+- ✅ Automatic credential discovery (IAM roles, environment variables, AWS config file)
+- ✅ Support for S3-compatible services (MinIO, LocalStack, DigitalOcean Spaces)
+- ✅ Configurable key prefix for organizing documents
+- ✅ Document existence check without downloading (HEAD request)
+- ✅ List documents in bucket
+- ✅ Automatic retry on transient failures
+- ✅ PDF validation on download
+
+#### Local Filesystem PDF Source Plugin
+
+Retrieve PDF documents from the local filesystem. Ideal for development, testing, or when PDFs are stored on a mounted volume or network share.
+
+**Basic configuration:**
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "local",
+      "config": {
+        "base_path": "./data/pdfs"
+      }
+    }
+  }
+}
+```
+
+**Configuration with subdirectory support:**
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "local",
+      "config": {
+        "base_path": "/mnt/documents/pdfs",
+        "recursive": true,
+        "create_base_path": true
+      }
+    }
+  }
+}
+```
+
+**Docker volume mount example:**
+
+```yaml
+# docker-compose.yml
+services:
+  openmark:
+    image: openmark:latest
+    volumes:
+      - ./my-pdfs:/app/data/pdfs:ro
+```
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "local",
+      "config": {
+        "base_path": "/app/data/pdfs",
+        "recursive": true
+      }
+    }
+  }
+}
+```
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `base_path` | string | No | ./data/pdfs | Base directory path for PDF files |
+| `recursive` | boolean | No | false | Search subdirectories recursively |
+| `allowed_extensions` | array | No | [".pdf"] | List of allowed file extensions |
+| `create_base_path` | boolean | No | true | Create base_path if it doesn't exist |
+
+**Document ID to File Path Mapping:**
+
+| Configuration | Document ID | File Path |
+|---------------|-------------|-----------|
+| `base_path: "./data/pdfs"` | `invoice_001` | `./data/pdfs/invoice_001.pdf` |
+| `base_path: "./data/pdfs"` | `2024/report` | `./data/pdfs/2024/report.pdf` |
+| `recursive: true` | `invoice_001` | Searches in all subdirectories |
+
+**Security Features:**
+- ✅ Path traversal protection (prevents `../` attacks)
+- ✅ Validates file paths stay within base_path
+- ✅ Extension validation
+
+**Features:**
+- ✅ Simple file-based document storage
+- ✅ Recursive subdirectory search
+- ✅ Docker volume mount friendly
+- ✅ Document listing and metadata
+- ✅ Automatic directory creation
+- ✅ PDF validation on read
+
+#### WebDAV PDF Source Plugin
+
+Retrieve PDF documents from a WebDAV server (Nextcloud, ownCloud, Apache mod_dav, Nginx, SharePoint, etc.).
+
+**Basic configuration:**
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "webdav",
+      "config": {
+        "base_url": "https://webdav.example.com/documents/"
+      }
+    }
+  }
+}
+```
+
+**Configuration with authentication:**
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "webdav",
+      "config": {
+        "base_url": "https://nextcloud.example.com/remote.php/dav/files/username/",
+        "username": "your-username",
+        "password": "your-app-password",
+        "prefix": "Documents/PDFs",
+        "timeout": 30
+      }
+    }
+  }
+}
+```
+
+**Configuration for Nextcloud:**
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "webdav",
+      "config": {
+        "base_url": "https://your-nextcloud.com/remote.php/dav/files/username/",
+        "username": "username",
+        "password": "app-password-from-nextcloud-settings",
+        "prefix": "Documents"
+      }
+    }
+  }
+}
+```
+
+**Configuration for ownCloud:**
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "webdav",
+      "config": {
+        "base_url": "https://your-owncloud.com/remote.php/webdav/",
+        "username": "username",
+        "password": "password",
+        "auth_type": "basic"
+      }
+    }
+  }
+}
+```
+
+**Configuration with Digest authentication:**
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "webdav",
+      "config": {
+        "base_url": "https://webdav.example.com/",
+        "username": "user",
+        "password": "password",
+        "auth_type": "digest"
+      }
+    }
+  }
+}
+```
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `base_url` | string | Yes | - | WebDAV server URL (must end with /) |
+| `username` | string | No | - | Username for authentication |
+| `password` | string | No | - | Password for authentication |
+| `prefix` | string | No | - | Path prefix for documents (e.g., `Documents/PDFs`) |
+| `timeout` | number | No | 30 | Request timeout in seconds |
+| `verify_ssl` | boolean | No | true | Verify SSL certificates |
+| `auth_type` | string | No | basic | Authentication type: `basic` or `digest` |
+
+**Document ID to WebDAV URL Mapping:**
+
+| Configuration | Document ID | WebDAV URL |
+|---------------|-------------|------------|
+| `base_url: "https://dav.example.com/"` | `invoice_001` | `https://dav.example.com/invoice_001.pdf` |
+| `prefix: "documents"` | `invoice_001` | `https://dav.example.com/documents/invoice_001.pdf` |
+| `prefix: "2024/reports"` | `quarterly` | `https://dav.example.com/2024/reports/quarterly.pdf` |
+
+**Compatible WebDAV Servers:**
+- ✅ Nextcloud
+- ✅ ownCloud
+- ✅ Apache mod_dav
+- ✅ Nginx with ngx_http_dav_module
+- ✅ Microsoft SharePoint
+- ✅ Box.com (WebDAV interface)
+- ✅ Any RFC 4918 compliant server
+
+**Features:**
+- ✅ Basic and Digest authentication support
+- ✅ Document listing via PROPFIND
+- ✅ Document metadata retrieval
+- ✅ Connection testing
+- ✅ SSL/TLS support
+- ✅ PDF validation on download
+- ✅ URL encoding for special characters
+
+#### FTP/FTPS PDF Source Plugin
+
+Retrieve PDF documents from an FTP or FTPS (FTP over TLS) server.
+
+**Basic configuration:**
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "ftp",
+      "config": {
+        "host": "ftp.example.com",
+        "username": "user",
+        "password": "password"
+      }
+    }
+  }
+}
+```
+
+**Configuration with directory prefix:**
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "ftp",
+      "config": {
+        "host": "ftp.example.com",
+        "port": 21,
+        "username": "documents-user",
+        "password": "secure-password",
+        "prefix": "/documents/pdfs",
+        "passive": true,
+        "timeout": 30
+      }
+    }
+  }
+}
+```
+
+**Configuration with FTPS (FTP over TLS):**
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "ftp",
+      "config": {
+        "host": "secure-ftp.example.com",
+        "port": 21,
+        "username": "user",
+        "password": "password",
+        "use_tls": true,
+        "prefix": "/secure/documents"
+      }
+    }
+  }
+}
+```
+
+**Configuration for anonymous FTP:**
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "ftp",
+      "config": {
+        "host": "ftp.public-archive.org",
+        "prefix": "/pub/documents"
+      }
+    }
+  }
+}
+```
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `host` | string | Yes | - | FTP server hostname or IP address |
+| `port` | number | No | 21 | FTP server port |
+| `username` | string | No | anonymous | Username for authentication |
+| `password` | string | No | (empty) | Password for authentication |
+| `prefix` | string | No | - | Directory path prefix (e.g., `/documents/pdfs`) |
+| `passive` | boolean | No | true | Use passive mode (recommended for firewalls/NAT) |
+| `timeout` | number | No | 30 | Connection timeout in seconds |
+| `use_tls` | boolean | No | false | Use FTPS (FTP over TLS) |
+| `encoding` | string | No | utf-8 | Server filename encoding |
+
+**Document ID to FTP Path Mapping:**
+
+| Configuration | Document ID | FTP Path |
+|---------------|-------------|----------|
+| `host: "ftp.example.com"` | `invoice_001` | `/invoice_001.pdf` |
+| `prefix: "/documents"` | `invoice_001` | `/documents/invoice_001.pdf` |
+| `prefix: "/2024/reports"` | `quarterly` | `/2024/reports/quarterly.pdf` |
+
+**Active vs Passive Mode:**
+
+| Mode | Description | Use When |
+|------|-------------|----------|
+| **Passive** (default) | Client initiates all connections | Behind firewall/NAT, most common |
+| **Active** | Server connects back to client | Direct connection, legacy servers |
+
+**FTP vs FTPS:**
+
+| Protocol | Port | Description |
+|----------|------|-------------|
+| **FTP** | 21 | Standard unencrypted FTP |
+| **FTPS** | 21/990 | FTP over TLS (encrypted) |
+
+> ⚠️ **Security Note:** Standard FTP transmits credentials in plain text. Use FTPS (`use_tls: true`) for secure connections.
+
+**Features:**
+- ✅ FTP and FTPS (FTP over TLS) support
+- ✅ Active and Passive mode support
+- ✅ Anonymous FTP access
+- ✅ Directory prefix configuration
+- ✅ Document listing
+- ✅ Document metadata (size, modification time)
+- ✅ Connection testing
+- ✅ Optional upload support
+- ✅ PDF validation on download
+
+#### SFTP PDF Source Plugin (SSH File Transfer Protocol)
+
+The SFTP plugin retrieves PDFs from any server accessible via SSH/SFTP. This is different from FTPS - SFTP runs over SSH and provides better security. Compatible with Linux/Unix servers, NAS devices, cloud VMs, and any SSH-enabled system.
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "sftp",
+      "config": {
+        "host": "sftp.example.com",
+        "port": 22,
+        "username": "pdf_user",
+        "password": "your-password",
+        "prefix": "/var/documents/pdfs",
+        "timeout": 30
+      }
+    }
+  }
+}
+```
+
+**SSH Key Authentication (Recommended):**
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "sftp",
+      "config": {
+        "host": "sftp.example.com",
+        "port": 22,
+        "username": "pdf_user",
+        "private_key_path": "/path/to/id_rsa",
+        "private_key_passphrase": "optional-key-passphrase",
+        "prefix": "/data/pdfs",
+        "known_hosts_path": "/home/user/.ssh/known_hosts"
+      }
+    }
+  }
+}
+```
+
+**Configuration Options:**
+
+| Option | Required | Default | Description |
+|--------|----------|---------|-------------|
+| `host` | ✅ | - | SFTP server hostname or IP |
+| `port` | ❌ | 22 | SSH port |
+| `username` | ✅ | - | SSH username |
+| `password` | ❌ | - | SSH password (use if no key auth) |
+| `private_key_path` | ❌ | - | Path to private key file (RSA, Ed25519, ECDSA, DSS) |
+| `private_key_passphrase` | ❌ | - | Passphrase for encrypted private key |
+| `prefix` | ❌ | `/` | Directory path prefix for documents |
+| `timeout` | ❌ | 30 | Connection timeout in seconds |
+| `known_hosts_path` | ❌ | - | Path to known_hosts file for host verification |
+| `auto_add_host_key` | ❌ | false | Auto-add unknown host keys (dev only!) |
+| `compress` | ❌ | false | Enable SSH compression |
+
+**Server Setup Examples:**
+
+**1. Linux/Unix Server:**
+
+```bash
+# Create a dedicated user for PDF access
+sudo useradd -m -s /bin/bash pdf_user
+sudo mkdir -p /var/pdfs
+sudo chown pdf_user:pdf_user /var/pdfs
+
+# Set up SSH key authentication
+sudo -u pdf_user mkdir -p /home/pdf_user/.ssh
+# Add your public key to /home/pdf_user/.ssh/authorized_keys
+```
+
+Config:
+```json
+{
+  "host": "192.168.1.100",
+  "username": "pdf_user",
+  "private_key_path": "/app/keys/id_ed25519",
+  "prefix": "/var/pdfs"
+}
+```
+
+**2. Synology NAS:**
+
+Config:
+```json
+{
+  "host": "synology.local",
+  "port": 22,
+  "username": "admin",
+  "password": "your-password",
+  "prefix": "/volume1/documents/pdfs"
+}
+```
+
+**3. AWS EC2 / Cloud VM:**
+
+Config:
+```json
+{
+  "host": "ec2-xxx.compute.amazonaws.com",
+  "port": 22,
+  "username": "ubuntu",
+  "private_key_path": "/app/keys/aws-key.pem",
+  "prefix": "/home/ubuntu/pdfs"
+}
+```
+
+**4. Azure VM:**
+
+Config:
+```json
+{
+  "host": "your-vm.westeurope.cloudapp.azure.com",
+  "username": "azureuser",
+  "private_key_path": "/app/keys/azure-key.pem",
+  "prefix": "/data/documents"
+}
+```
+
+**Document Path Resolution:**
+
+| Config | Document ID | Resolved Path |
+|--------|-------------|---------------|
+| `prefix: ""` | `report` | `/report.pdf` |
+| `prefix: "/docs"` | `report` | `/docs/report.pdf` |
+| `prefix: "/data/pdfs"` | `2024/annual` | `/data/pdfs/2024/annual.pdf` |
+
+**FTP vs FTPS vs SFTP Comparison:**
+
+| Feature | FTP | FTPS | SFTP |
+|---------|-----|------|------|
+| Protocol Base | FTP | FTP + TLS | SSH |
+| Default Port | 21 | 21/990 | 22 |
+| Encryption | ❌ None | ✅ TLS | ✅ SSH |
+| Authentication | User/Pass | User/Pass + Cert | User/Pass + Keys |
+| Firewall Friendly | ❌ Multiple ports | ❌ Multiple ports | ✅ Single port |
+| Linux Native | Requires FTP server | Requires FTP server | ✅ Built-in (OpenSSH) |
+
+> 🔐 **Security Recommendation:** Use SSH key authentication instead of passwords. Keys are more secure and can be easily rotated.
+
+> ⚠️ **Host Key Verification:** Set `auto_add_host_key: false` in production and provide a `known_hosts_path` to prevent man-in-the-middle attacks.
+
+**Docker Deployment:**
+
+Mount your SSH keys as a read-only volume:
+
+```yaml
+services:
+  openmark:
+    volumes:
+      - ./ssh_keys:/app/keys:ro
+```
+
+**Features:**
+- ✅ SSH key authentication (RSA, Ed25519, ECDSA, DSS)
+- ✅ Password authentication
+- ✅ Known hosts verification
+- ✅ SSH compression support
+- ✅ Directory prefix configuration
+- ✅ Document listing
+- ✅ Document metadata (size, permissions, timestamps)
+- ✅ Connection testing
+- ✅ Optional upload/delete support
+- ✅ PDF validation on download
+
+#### CMIS PDF Source Plugin (Enterprise Content Management)
+
+The CMIS plugin retrieves PDFs from any ECM (Enterprise Content Management) system that supports the CMIS standard (Content Management Interoperability Services). This OASIS standard is supported by many enterprise systems.
+
+**Supported ECM Systems:**
+- **Alfresco** (Community & Enterprise)
+- **Nuxeo Platform**
+- **Microsoft SharePoint** (with CMIS connector)
+- **OpenText Documentum**
+- **IBM FileNet**
+- **SAP Document Management**
+- Any other CMIS 1.0/1.1 compliant system
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "cmis",
+      "config": {
+        "url": "https://ecm.example.com/alfresco/api/-default-/public/cmis/versions/1.1/browser",
+        "binding": "browser",
+        "username": "admin",
+        "password": "your-password",
+        "root_folder_path": "/Sites/documents/pdfs"
+      }
+    }
+  }
+}
+```
+
+**Configuration Options:**
+
+| Option | Required | Default | Description |
+|--------|----------|---------|-------------|
+| `url` | ✅ | - | CMIS service endpoint URL |
+| `binding` | ❌ | `browser` | CMIS binding: `browser` or `atompub` |
+| `repository_id` | ❌ | first | Repository ID (uses first if not specified) |
+| `username` | ✅ | - | Authentication username |
+| `password` | ✅ | - | Authentication password |
+| `root_folder_path` | ❌ | `/` | Root folder path for documents |
+| `query_type` | ❌ | `path` | How to find docs: `path`, `id`, or `query` |
+| `timeout` | ❌ | 30 | Request timeout in seconds |
+| `verify_ssl` | ❌ | true | Verify SSL certificates |
+
+**ECM-Specific Configuration Examples:**
+
+**1. Alfresco Community/Enterprise:**
+
+```json
+{
+  "url": "https://alfresco.example.com/alfresco/api/-default-/public/cmis/versions/1.1/browser",
+  "binding": "browser",
+  "username": "admin",
+  "password": "admin",
+  "root_folder_path": "/Sites/mysite/documentLibrary/pdfs"
+}
+```
+
+**2. Nuxeo Platform:**
+
+```json
+{
+  "url": "https://nuxeo.example.com/nuxeo/json/cmis",
+  "binding": "browser",
+  "repository_id": "default",
+  "username": "Administrator",
+  "password": "Administrator",
+  "root_folder_path": "/default-domain/workspaces/documents"
+}
+```
+
+**3. SharePoint (with CMIS connector):**
+
+```json
+{
+  "url": "https://sharepoint.example.com/_vti_bin/cmis/rest",
+  "binding": "atompub",
+  "username": "user@domain.com",
+  "password": "your-password",
+  "root_folder_path": "/Shared Documents/PDFs"
+}
+```
+
+**4. OpenText Documentum:**
+
+```json
+{
+  "url": "https://documentum.example.com/emc-cmis-webapp/browser",
+  "binding": "browser",
+  "repository_id": "MyRepository",
+  "username": "dm_admin",
+  "password": "your-password",
+  "root_folder_path": "/Cabinet/Documents"
+}
+```
+
+**Query Types:**
+
+| Query Type | Document ID Format | Use Case |
+|------------|-------------------|----------|
+| `path` (default) | `reports/annual` | Documents organized in folders |
+| `id` | `workspace://SpacesStore/abc-123` | Direct object ID access |
+| `query` | `annual_report` | Search by document name |
+
+**Document Path Resolution (query_type: path):**
+
+| Config | Document ID | Resolved Path |
+|--------|-------------|---------------|
+| `root_folder_path: ""` | `report` | `/report.pdf` |
+| `root_folder_path: "/docs"` | `report` | `/docs/report.pdf` |
+| `root_folder_path: "/Sites/mysite"` | `2024/annual` | `/Sites/mysite/2024/annual.pdf` |
+
+**CMIS Bindings:**
+
+| Binding | Description | Recommended For |
+|---------|-------------|-----------------|
+| `browser` | JSON-based, modern | Alfresco 5+, Nuxeo, most modern ECMs |
+| `atompub` | XML-based, legacy | SharePoint, older systems |
+
+> 💡 **Tip:** Use `browser` binding when possible - it's more efficient and easier to debug.
+
+**Advanced Features:**
+
+```python
+# Document versioning
+versions = plugin.get_document_versions('annual_report')
+for v in versions:
+    print(f"Version {v['version_label']}: {v['checkin_comment']}")
+
+# Full-text search
+results = plugin.search_documents('budget 2024')
+for doc in results:
+    print(f"{doc['name']} - {doc['path']}")
+
+# Get document metadata
+metadata = plugin.get_document_metadata('report')
+print(f"Last modified by: {metadata['last_modified_by']}")
+```
+
+**Features:**
+- ✅ CMIS 1.0 and 1.1 support
+- ✅ Browser and AtomPub bindings
+- ✅ Path-based, ID-based, and query-based document access
+- ✅ Multiple ECM vendor support
+- ✅ Document versioning support
+- ✅ Full-text search
+- ✅ Rich metadata extraction
+- ✅ SSL/TLS support
+- ✅ Connection testing
+- ✅ PDF validation on download
+
 #### Local Annotations Plugin
 
 > ⚠️ **WARNING: Development/Demo Use Only**
@@ -774,6 +1548,38 @@ OpenMark uses a **Document Access Token (DAT)** system for secure, stateless doc
 
 DAT is a self-contained JSON Web Token (JWT) that includes all necessary information to access a specific document:
 
+### JWT Token Architecture
+
+OpenMark uses JWT (JSON Web Tokens) for all authentication and authorization:
+
+#### Token Types
+
+| Token Type | Purpose | Lifetime | Usage |
+|------------|---------|----------|-------|
+| **AT (Authentication Token)** | API authentication after login | Configurable (default: 24h) | `Authorization: Bearer <token>` header |
+| **DAT (Document Access Token)** | Document viewing access | 4× cache duration (min 2h) | URL parameter `?dat=<token>` |
+
+#### Authentication Token (AT) Structure
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Authentication Token (AT)                     │
+├─────────────────────────────────────────────────────────────────┤
+│  Header:    { "alg": "HS256", "typ": "JWT" }                    │
+│  Payload:   {                                                   │
+│               "sub": "username",         // User identifier     │
+│               "role": "admin",           // User role           │
+│               "type": "at",              // Token type          │
+│               "iat": 1736262000,         // Issued at           │
+│               "exp": 1736348400,         // Expiration          │
+│               "nbf": 1736262000          // Not before          │
+│             }                                                   │
+│  Signature: HMACSHA256(header + payload, SECRET_KEY)            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Document Access Token (DAT) Structure
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Document Access Token (DAT)                  │
@@ -793,25 +1599,26 @@ DAT is a self-contained JSON Web Token (JWT) that includes all necessary informa
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Benefits
+### Benefits of JWT Architecture
 
-| Feature | Legacy (token + tempDocumentId) | DAT |
-|---------|--------------------------------|-----|
-| Page refresh (F5) | ❌ Loses access | ✅ Works |
-| Token validity | Short (matches auth) | Long (2 hours) |
-| Parameters in URL | Multiple params | Single `dat` param |
-| Re-authentication | Required on refresh | Not needed |
-| Parallel documents | Complex | Easy - each has own DAT |
-| Shareable URL | No (needs valid token) | Yes (within validity) |
+| Feature | Description |
+|---------|-------------|
+| **Stateless** | Tokens are self-contained, no server-side session storage required |
+| **Page refresh (F5)** | DAT survives browser refresh |
+| **Scalability** | Works seamlessly with load balancers and multiple instances |
+| **Token revocation** | Supported via blacklist (in-memory, MongoDB, or PostgreSQL) |
+| **Single URL parameter** | DAT contains all permissions, no multiple query params needed |
+| **Shareable URLs** | Document URLs with DAT can be shared (within validity period) |
 
 ### How It Works
 
 ```
-1. User authenticates          → Auth token (short-lived)
-2. Request document access     → DAT generated (2-hour validity)
-3. View document with DAT      → No auth token needed
+1. User authenticates          → AT (Authentication Token) returned
+2. Request document access     → DAT generated (2-hour minimum validity)
+3. View document with DAT      → No AT needed for viewing
 4. Page refresh (F5)           → DAT still valid ✅
 5. Save annotations            → DAT authenticates the request
+6. Logout                      → AT revoked via blacklist
 ```
 
 ### Configuration
@@ -1026,51 +1833,25 @@ Authorization: Bearer <token>
 
 View a PDF document with annotation capabilities.
 
-**Authentication Methods:**
+**Authentication:**
 
-1. **Using Document Access Token (DAT)** - Recommended:
-   | Parameter | Type | Required | Description |
-   |-----------|------|----------|-------------|
-   | `dat` | string | Yes | Document Access Token (contains all permissions) |
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `dat` | string | Yes | Document Access Token (JWT containing all permissions) |
 
-2. **Using Legacy Method** (backward compatible):
-   | Parameter | Type | Required | Description |
-   |-----------|------|----------|-------------|
-   | `tempDocumentId` | string | Yes | Temporary document ID |
-   | `token` | string | Yes | Authentication token |
-   | `hideAnnotationsTools` | boolean | No | Hide annotation tools |
-   | `hideAnnotations` | boolean | No | Hide existing annotations |
-   | `hideLogo` | boolean | No | Hide the OpenMark logo |
+> **Note:** View options (hideAnnotationsTools, hideAnnotations, hideLogo) are embedded in the DAT token. No need to add them as query parameters.
 
-> **Note:** When using DAT, view options (hideAnnotationsTools, hideAnnotations, hideLogo) are embedded in the token. No need to add them as query parameters.
-
-**View Modes:**
+**View Modes (configured when requesting document):**
 
 - **Default mode**: Full annotation capabilities with toolbar and sidebar
 - **Read-only mode** (`hideAnnotationsTools=true`): View annotations but cannot create/edit/delete them
 - **Clean view mode** (`hideAnnotations=true`): View PDF without any annotations visible (also hides tools)
 - **No branding mode** (`hideLogo=true`): Hide the OpenMark logo for embedded or white-label usage
 
-**Example URLs:**
+**Example URL:**
 
 ```
-# Using DAT (Recommended - survives page refresh)
 /api/viewDocument?dat=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-
-# Legacy: Full mode (default)
-/api/viewDocument?tempDocumentId=temp_abc123&token=xyz
-
-# Legacy: Read-only mode
-/api/viewDocument?tempDocumentId=temp_abc123&token=xyz&hideAnnotationsTools=true
-
-# Legacy: Clean view (no annotations)
-/api/viewDocument?tempDocumentId=temp_abc123&token=xyz&hideAnnotations=true
-
-# Legacy: Hide logo only
-/api/viewDocument?tempDocumentId=temp_abc123&token=xyz&hideLogo=true
-
-# Legacy: Clean view with no logo (embedded mode)
-/api/viewDocument?tempDocumentId=temp_abc123&token=xyz&hideAnnotations=true&hideLogo=true
 ```
 
 **Response:**
@@ -1214,79 +1995,154 @@ Authorization: Bearer <token>
 
 ## Plugin Development
 
+OpenMark features an **automatic plugin discovery system** that scans plugin directories at startup and registers all discovered plugins. This allows you to add custom plugins simply by placing Python files in the appropriate directories.
+
+### Plugin Types
+
 OpenMark supports three types of plugins:
 
 1. **Authentication Plugins** - Handle user authentication
 2. **PDF Source Plugins** - Retrieve PDF documents from various sources
 3. **Annotations Plugins** - Store and retrieve annotations
 
+### Automatic Plugin Discovery
+
+At startup, OpenMark automatically discovers plugins by:
+
+1. Scanning built-in plugin directories (`app/plugins/auth/`, `app/plugins/pdf_source/`, `app/plugins/annotations/`)
+2. Scanning the custom plugins directory (`custom_plugins/` or path set via `OPENMARK_CUSTOM_PLUGINS_DIR`)
+3. Finding all classes that inherit from the base plugin classes
+4. Registering them with names derived from their class names
+
+**Plugin naming convention:**
+- `LocalAuthPlugin` → `local`
+- `MongoDBAnnotationsPlugin` → `mongodb`
+- `S3SourcePlugin` → `s3`
+- `MyCustomAuthPlugin` → `mycustom`
+
+### Adding Custom Plugins (Docker)
+
+The easiest way to add custom plugins when using Docker is to mount a volume:
+
+```yaml
+# docker-compose.yml
+services:
+  openmark:
+    image: openmark:latest
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./custom_plugins:/app/custom_plugins:ro
+```
+
+**Directory structure:**
+```
+custom_plugins/
+├── auth/
+│   └── my_ldap_auth.py
+├── pdf_source/
+│   └── azure_blob_source.py
+└── annotations/
+    └── redis_annotations.py
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENMARK_CUSTOM_PLUGINS_DIR` | `./custom_plugins` | Path to custom plugins directory |
+
 ### Creating a Custom Authentication Plugin
 
-Create a new file in `plugins/auth/`:
+Create a new file in `custom_plugins/auth/`:
 
 ```python
-# plugins/auth/custom_auth.py
+# custom_plugins/auth/ldap_auth.py
 
-from plugins.base import AuthenticationPlugin
+from app.plugins.base import AuthenticationPlugin
+from typing import Optional
+import hashlib
+import secrets
+from datetime import datetime, timedelta
 
-class CustomAuthPlugin(AuthenticationPlugin):
-    """Custom authentication plugin example."""
+class LDAPAuthPlugin(AuthenticationPlugin):
+    """LDAP authentication plugin example."""
     
     def __init__(self, config: dict):
         super().__init__(config)
-        # Initialize your authentication backend
-        self.api_url = config.get('api_url')
+        self.ldap_url = config.get('ldap_url', 'ldap://localhost:389')
+        self.base_dn = config.get('base_dn', 'dc=example,dc=com')
+        self.token_expiry_hours = config.get('token_expiry_hours', 24)
+        self._tokens = {}  # In production, use Redis or database
     
-    def authenticate(self, username: str, password: str) -> dict | None:
+    def authenticate(self, username: str, password: str) -> Optional[dict]:
         """
-        Authenticate a user.
+        Authenticate a user against LDAP.
         
         Args:
             username: The username
             password: The password
             
         Returns:
-            User dict with 'username' and 'role' keys if successful,
-            None if authentication fails
+            Dict with 'token' and 'expires_at' if successful, None otherwise
         """
-        # Implement your authentication logic
-        # Example: call external API
-        response = requests.post(f"{self.api_url}/auth", json={
-            "username": username,
-            "password": password
-        })
-        
-        if response.status_code == 200:
-            data = response.json()
-            return {
-                "username": data["username"],
-                "role": data.get("role", "user")
-            }
-        return None
-    
-    def validate_token(self, token: str) -> dict | None:
-        """
-        Validate an authentication token.
-        
-        Args:
-            token: The JWT token
+        try:
+            # Your LDAP authentication logic here
+            # import ldap
+            # conn = ldap.initialize(self.ldap_url)
+            # conn.simple_bind_s(f"uid={username},{self.base_dn}", password)
             
-        Returns:
-            User dict if valid, None otherwise
-        """
-        # Implement token validation
-        pass
+            # Generate token
+            token = secrets.token_urlsafe(32)
+            expires_at = datetime.utcnow() + timedelta(hours=self.token_expiry_hours)
+            
+            self._tokens[token] = {
+                'username': username,
+                'role': 'user',
+                'expires_at': expires_at
+            }
+            
+            return {
+                'token': token,
+                'expires_at': expires_at.isoformat()
+            }
+        except Exception as e:
+            print(f"LDAP authentication error: {e}")
+            return None
+    
+    def validate_token(self, token: str) -> Optional[dict]:
+        """Validate an authentication token."""
+        if token not in self._tokens:
+            return None
+        
+        token_data = self._tokens[token]
+        if datetime.utcnow() > token_data['expires_at']:
+            del self._tokens[token]
+            return None
+        
+        return {
+            'username': token_data['username'],
+            'role': token_data['role']
+        }
+    
+    def invalidate_token(self, token: str) -> bool:
+        """Invalidate an authentication token."""
+        if token in self._tokens:
+            del self._tokens[token]
+            return True
+        return False
 ```
 
-Register the plugin in `config.json`:
+Configure in `config.json`:
 
 ```json
 {
   "plugins": {
     "authentication": {
-      "type": "custom_auth",
+      "type": "ldap",
       "config": {
-        "api_url": "https://your-auth-service.com"
+        "ldap_url": "ldap://your-ldap-server:389",
+        "base_dn": "dc=yourcompany,dc=com",
+        "token_expiry_hours": 24
       }
     }
   }
@@ -1296,126 +2152,191 @@ Register the plugin in `config.json`:
 ### Creating a Custom PDF Source Plugin
 
 ```python
-# plugins/pdf_source/s3_source.py
+# custom_plugins/pdf_source/azure_blob_source.py
 
-from plugins.base import PDFSourcePlugin
-import boto3
+from app.plugins.base import PDFSourcePlugin
+from typing import Optional
 
-class S3SourcePlugin(PDFSourcePlugin):
-    """AWS S3 PDF source plugin."""
+class AzureBlobSourcePlugin(PDFSourcePlugin):
+    """Azure Blob Storage PDF source plugin."""
     
     def __init__(self, config: dict):
         super().__init__(config)
-        self.s3_client = boto3.client(
-            's3',
-            aws_access_key_id=config['access_key'],
-            aws_secret_access_key=config['secret_key'],
-            region_name=config.get('region', 'us-east-1')
-        )
-        self.bucket = config['bucket']
+        self.connection_string = config.get('connection_string')
+        self.container_name = config.get('container_name', 'pdfs')
+        self.prefix = config.get('prefix', '')
+        self._client = None
     
-    def get_document(self, document_id: str) -> bytes | None:
-        """
-        Retrieve a PDF document.
-        
-        Args:
-            document_id: The document identifier
+    @property
+    def client(self):
+        """Lazy initialization of Azure Blob client."""
+        if self._client is None:
+            try:
+                from azure.storage.blob import BlobServiceClient
+            except ImportError:
+                raise ImportError(
+                    "azure-storage-blob is required. "
+                    "Install with: pip install azure-storage-blob"
+                )
             
-        Returns:
-            PDF bytes if found, None otherwise
-        """
-        try:
-            response = self.s3_client.get_object(
-                Bucket=self.bucket,
-                Key=f"{document_id}.pdf"
+            self._client = BlobServiceClient.from_connection_string(
+                self.connection_string
             )
-            return response['Body'].read()
-        except Exception:
+        return self._client
+    
+    def _get_blob_name(self, document_id: str) -> str:
+        """Build the blob name for a document."""
+        if not document_id.endswith('.pdf'):
+            document_id = f"{document_id}.pdf"
+        if self.prefix:
+            return f"{self.prefix.rstrip('/')}/{document_id}"
+        return document_id
+    
+    def get_document(self, document_id: str) -> Optional[bytes]:
+        """Retrieve a PDF document from Azure Blob Storage."""
+        try:
+            blob_name = self._get_blob_name(document_id)
+            container = self.client.get_container_client(self.container_name)
+            blob = container.get_blob_client(blob_name)
+            return blob.download_blob().readall()
+        except Exception as e:
+            print(f"Error fetching document from Azure Blob: {e}")
             return None
     
     def document_exists(self, document_id: str) -> bool:
-        """Check if a document exists."""
+        """Check if a document exists in Azure Blob Storage."""
         try:
-            self.s3_client.head_object(
-                Bucket=self.bucket,
-                Key=f"{document_id}.pdf"
-            )
-            return True
+            blob_name = self._get_blob_name(document_id)
+            container = self.client.get_container_client(self.container_name)
+            blob = container.get_blob_client(blob_name)
+            return blob.exists()
         except Exception:
             return False
+```
+
+Configure in `config.json`:
+
+```json
+{
+  "plugins": {
+    "pdf_source": {
+      "type": "azureblob",
+      "config": {
+        "connection_string": "DefaultEndpointsProtocol=https;AccountName=...",
+        "container_name": "documents",
+        "prefix": "pdfs/"
+      }
+    }
+  }
+}
 ```
 
 ### Creating a Custom Annotations Plugin
 
 ```python
-# plugins/annotations/postgresql_annotations.py
+# custom_plugins/annotations/redis_annotations.py
 
-from plugins.base import AnnotationsPlugin
-import psycopg2
+from app.plugins.base import AnnotationsPlugin
+import json
 
-class PostgreSQLAnnotationsPlugin(AnnotationsPlugin):
-    """PostgreSQL annotations storage plugin."""
+class RedisAnnotationsPlugin(AnnotationsPlugin):
+    """Redis-based annotations storage plugin."""
     
     def __init__(self, config: dict):
         super().__init__(config)
-        self.conn = psycopg2.connect(
-            host=config['host'],
-            port=config.get('port', 5432),
-            database=config['database'],
-            user=config['user'],
-            password=config['password']
-        )
+        self.redis_url = config.get('redis_url', 'redis://localhost:6379/0')
+        self.key_prefix = config.get('key_prefix', 'openmark:annotations')
+        self.ttl = config.get('ttl_seconds')  # Optional TTL
+        self._client = None
+    
+    @property
+    def client(self):
+        """Lazy initialization of Redis client."""
+        if self._client is None:
+            try:
+                import redis
+            except ImportError:
+                raise ImportError(
+                    "redis is required. Install with: pip install redis"
+                )
+            self._client = redis.from_url(self.redis_url)
+        return self._client
+    
+    def _get_key(self, user_id: str, document_id: str) -> str:
+        """Build Redis key for annotations."""
+        return f"{self.key_prefix}:{user_id}:{document_id}"
     
     def save_annotations(self, user_id: str, document_id: str, 
                          annotations: dict) -> bool:
-        """Save annotations to PostgreSQL."""
+        """Save annotations to Redis."""
         try:
-            cursor = self.conn.cursor()
-            cursor.execute("""
-                INSERT INTO annotations (user_id, document_id, data)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (user_id, document_id) 
-                DO UPDATE SET data = %s, updated_at = NOW()
-            """, (user_id, document_id, json.dumps(annotations), 
-                  json.dumps(annotations)))
-            self.conn.commit()
+            key = self._get_key(user_id, document_id)
+            data = json.dumps(annotations)
+            
+            if self.ttl:
+                self.client.setex(key, self.ttl, data)
+            else:
+                self.client.set(key, data)
             return True
-        except Exception:
+        except Exception as e:
+            print(f"Error saving annotations to Redis: {e}")
             return False
     
     def get_annotations(self, user_id: str, document_id: str) -> dict:
-        """Retrieve annotations from PostgreSQL."""
-        cursor = self.conn.cursor()
-        cursor.execute("""
-            SELECT data FROM annotations 
-            WHERE user_id = %s AND document_id = %s
-        """, (user_id, document_id))
+        """Retrieve annotations from Redis."""
+        try:
+            key = self._get_key(user_id, document_id)
+            data = self.client.get(key)
+            if data:
+                return json.loads(data)
+        except Exception as e:
+            print(f"Error retrieving annotations from Redis: {e}")
         
-        row = cursor.fetchone()
-        if row:
-            return json.loads(row[0])
         return {"notes": [], "highlights": []}
+```
+
+Configure in `config.json`:
+
+```json
+{
+  "plugins": {
+    "annotations": {
+      "type": "redis",
+      "config": {
+        "redis_url": "redis://localhost:6379/0",
+        "key_prefix": "myapp:annotations",
+        "ttl_seconds": 86400
+      }
+    }
+  }
+}
 ```
 
 ### Plugin Base Classes
 
-All plugins must inherit from their respective base class:
+All plugins must inherit from their respective base class in `app/plugins/base.py`:
 
 ```python
-# plugins/base.py
-
 from abc import ABC, abstractmethod
+from typing import Optional
 
 class AuthenticationPlugin(ABC):
     def __init__(self, config: dict):
         self.config = config
     
     @abstractmethod
-    def authenticate(self, username: str, password: str) -> dict | None:
+    def authenticate(self, username: str, password: str) -> Optional[dict]:
+        """Returns {'token': str, 'expires_at': str} or None"""
         pass
     
     @abstractmethod
-    def validate_token(self, token: str) -> dict | None:
+    def validate_token(self, token: str) -> Optional[dict]:
+        """Returns {'username': str, 'role': str} or None"""
+        pass
+    
+    @abstractmethod
+    def invalidate_token(self, token: str) -> bool:
+        """Returns True if successful"""
         pass
 
 
@@ -1424,11 +2345,13 @@ class PDFSourcePlugin(ABC):
         self.config = config
     
     @abstractmethod
-    def get_document(self, document_id: str) -> bytes | None:
+    def get_document(self, document_id: str) -> Optional[bytes]:
+        """Returns PDF bytes or None"""
         pass
     
     @abstractmethod
     def document_exists(self, document_id: str) -> bool:
+        """Returns True if document exists"""
         pass
 
 
@@ -1439,12 +2362,57 @@ class AnnotationsPlugin(ABC):
     @abstractmethod
     def save_annotations(self, user_id: str, document_id: str, 
                          annotations: dict) -> bool:
+        """Returns True if successful"""
         pass
     
     @abstractmethod
     def get_annotations(self, user_id: str, document_id: str) -> dict:
+        """Returns {'notes': [], 'highlights': []}"""
         pass
 ```
+
+### Listing Available Plugins
+
+At startup, OpenMark logs all discovered plugins:
+
+```
+🔍 Discovering plugins...
+  Scanning auth plugins in app/plugins/auth...
+  ✓ Registered auth plugin: local
+  ✓ Registered auth plugin: oauth
+  ✓ Registered auth plugin: saml
+  ✓ Registered auth plugin: mongodb
+  ✓ Registered auth plugin: postgresql
+  Scanning pdf_source plugins in app/plugins/pdf_source...
+  ✓ Registered pdf_source plugin: http
+  ✓ Registered pdf_source plugin: s3
+  Scanning annotations plugins in app/plugins/annotations...
+  ✓ Registered annotations plugin: local
+  ✓ Registered annotations plugin: mongodb
+  ✓ Registered annotations plugin: postgresql
+  Scanning custom plugins in ./custom_plugins...
+    Custom auth plugins...
+    ✓ Registered auth plugin: ldap
+    Custom pdf_source plugins...
+    ✓ Registered pdf_source plugin: azureblob
+✅ Plugin discovery complete. Found: {'auth': ['local', 'oauth', 'saml', 'mongodb', 'postgresql', 'ldap'], ...}
+```
+
+### Troubleshooting Custom Plugins
+
+**Plugin not discovered:**
+- Ensure the file is in the correct subdirectory (`auth/`, `pdf_source/`, or `annotations/`)
+- Check that the class inherits from the correct base class
+- Verify there are no syntax errors (check startup logs)
+- Make sure the file doesn't start with `__` or `test_`
+
+**Import errors:**
+- Install required dependencies in the Docker container
+- Use lazy initialization for optional dependencies
+
+**Plugin name conflicts:**
+- Custom plugins with the same name as built-in plugins will override them
+- Use unique class names to avoid conflicts
 
 ## Usage Examples
 

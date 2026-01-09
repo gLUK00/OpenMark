@@ -9,8 +9,11 @@ services:
       - ./config.json:/app/config.json:ro
       - ./data:/app/data
       - ./cache:/app/cache
+      # Mount custom plugins directory for user-provided plugins
+      - ./custom_plugins:/app/custom_plugins:ro
     environment:
       - FLASK_ENV=production
+      - OPENMARK_CUSTOM_PLUGINS_DIR=/app/custom_plugins
     restart: unless-stopped
 
   # Optional: MongoDB for annotations storage

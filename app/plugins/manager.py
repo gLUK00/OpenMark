@@ -1,13 +1,14 @@
-"""Plugin manager for OpenMark."""
+"""Plugin manager for OpenMark with automatic plugin discovery."""
 
 from typing import Optional
 
 from app.config import Config
 from app.plugins.base import AuthenticationPlugin, PDFSourcePlugin, AnnotationsPlugin
+from app.plugins.discovery import get_registry, PluginRegistry
 
 
 class PluginManager:
-    """Manages plugin loading and access."""
+    """Manages plugin loading and access with automatic discovery."""
     
     def __init__(self, config: Config):
         """Initialize the plugin manager.
@@ -20,10 +21,13 @@ class PluginManager:
         self._pdf_plugin: Optional[PDFSourcePlugin] = None
         self._annotations_plugin: Optional[AnnotationsPlugin] = None
         
+        # Get the plugin registry (triggers discovery if not already done)
+        self._registry: PluginRegistry = get_registry()
+        
         self._load_plugins()
     
     def _load_plugins(self):
-        """Load all configured plugins."""
+        """Load all configured plugins using the registry."""
         plugins_config = self.config.plugins
         
         # Load authentication plugin
@@ -48,7 +52,7 @@ class PluginManager:
         )
     
     def _load_auth_plugin(self, plugin_type: str, config: dict) -> AuthenticationPlugin:
-        """Load an authentication plugin.
+        """Load an authentication plugin from the registry.
         
         Args:
             plugin_type: Type of plugin to load
@@ -56,27 +60,23 @@ class PluginManager:
             
         Returns:
             Loaded authentication plugin
+            
+        Raises:
+            ValueError: If plugin type is not found
         """
-        if plugin_type == 'local':
-            from app.plugins.auth.local_auth import LocalAuthPlugin
-            return LocalAuthPlugin(config)
-        elif plugin_type == 'oauth':
-            from app.plugins.auth.oauth_auth import OAuthAuthPlugin
-            return OAuthAuthPlugin(config)
-        elif plugin_type == 'saml':
-            from app.plugins.auth.saml_auth import SAMLAuthPlugin
-            return SAMLAuthPlugin(config)
-        elif plugin_type == 'mongodb':
-            from app.plugins.auth.mongodb_auth import MongoDBAuthPlugin
-            return MongoDBAuthPlugin(config)
-        elif plugin_type == 'postgresql':
-            from app.plugins.auth.postgresql_auth import PostgreSQLAuthPlugin
-            return PostgreSQLAuthPlugin(config)
-        else:
-            raise ValueError(f"Unknown authentication plugin type: {plugin_type}")
+        plugin_class = self._registry.get_auth_plugin(plugin_type)
+        
+        if plugin_class is None:
+            available = ', '.join(self._registry.auth_plugins.keys())
+            raise ValueError(
+                f"Unknown authentication plugin type: '{plugin_type}'. "
+                f"Available plugins: {available}"
+            )
+        
+        return plugin_class(config)
     
     def _load_pdf_plugin(self, plugin_type: str, config: dict) -> PDFSourcePlugin:
-        """Load a PDF source plugin.
+        """Load a PDF source plugin from the registry.
         
         Args:
             plugin_type: Type of plugin to load
@@ -84,15 +84,23 @@ class PluginManager:
             
         Returns:
             Loaded PDF source plugin
+            
+        Raises:
+            ValueError: If plugin type is not found
         """
-        if plugin_type == 'http':
-            from app.plugins.pdf_source.http_source import HTTPSourcePlugin
-            return HTTPSourcePlugin(config)
-        else:
-            raise ValueError(f"Unknown PDF source plugin type: {plugin_type}")
+        plugin_class = self._registry.get_pdf_plugin(plugin_type)
+        
+        if plugin_class is None:
+            available = ', '.join(self._registry.pdf_plugins.keys())
+            raise ValueError(
+                f"Unknown PDF source plugin type: '{plugin_type}'. "
+                f"Available plugins: {available}"
+            )
+        
+        return plugin_class(config)
     
     def _load_annotations_plugin(self, plugin_type: str, config: dict) -> AnnotationsPlugin:
-        """Load an annotations plugin.
+        """Load an annotations plugin from the registry.
         
         Args:
             plugin_type: Type of plugin to load
@@ -100,18 +108,20 @@ class PluginManager:
             
         Returns:
             Loaded annotations plugin
+            
+        Raises:
+            ValueError: If plugin type is not found
         """
-        if plugin_type == 'local':
-            from app.plugins.annotations.local_annotations import LocalAnnotationsPlugin
-            return LocalAnnotationsPlugin(config)
-        elif plugin_type == 'mongodb':
-            from app.plugins.annotations.mongodb_annotations import MongoDBAnnotationsPlugin
-            return MongoDBAnnotationsPlugin(config)
-        elif plugin_type == 'postgresql':
-            from app.plugins.annotations.postgresql_annotations import PostgreSQLAnnotationsPlugin
-            return PostgreSQLAnnotationsPlugin(config)
-        else:
-            raise ValueError(f"Unknown annotations plugin type: {plugin_type}")
+        plugin_class = self._registry.get_annotations_plugin(plugin_type)
+        
+        if plugin_class is None:
+            available = ', '.join(self._registry.annotations_plugins.keys())
+            raise ValueError(
+                f"Unknown annotations plugin type: '{plugin_type}'. "
+                f"Available plugins: {available}"
+            )
+        
+        return plugin_class(config)
     
     @property
     def auth_plugin(self) -> AuthenticationPlugin:
@@ -127,3 +137,16 @@ class PluginManager:
     def annotations_plugin(self) -> AnnotationsPlugin:
         """Get the annotations plugin."""
         return self._annotations_plugin
+    
+    @property
+    def registry(self) -> PluginRegistry:
+        """Get the plugin registry."""
+        return self._registry
+    
+    def list_available_plugins(self) -> dict:
+        """List all available plugins.
+        
+        Returns:
+            Dict with plugin categories and their available types
+        """
+        return self._registry.list_plugins()

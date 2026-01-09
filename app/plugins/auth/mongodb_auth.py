@@ -1,11 +1,11 @@
-"""MongoDB authentication plugin."""
+"""MongoDB authentication plugin with JWT tokens."""
 
-import secrets
 import hashlib
 from datetime import datetime, timedelta
 from typing import Optional
 
 from app.plugins.base import AuthenticationPlugin
+from app.jwt_handler import get_jwt_handler
 
 # Try to import pymongo
 try:
@@ -17,13 +17,13 @@ except ImportError:
 
 
 class MongoDBAuthPlugin(AuthenticationPlugin):
-    """Authentication plugin using MongoDB for user storage.
+    """Authentication plugin using MongoDB for user storage with JWT tokens.
     
     Requires: pip install pymongo
     
-    This plugin stores users and active sessions in MongoDB collections,
-    providing scalable, persistent authentication with support for
-    multiple application instances.
+    This plugin stores users in MongoDB and uses stateless JWT tokens
+    for authentication. Token revocation is tracked in MongoDB for
+    logout functionality across distributed instances.
     """
     
     def __init__(self, config: dict):
@@ -34,7 +34,7 @@ class MongoDBAuthPlugin(AuthenticationPlugin):
                 - connection_string: MongoDB connection URI (default: mongodb://localhost:27017)
                 - database: Database name (default: openmark)
                 - users_collection: Users collection name (default: users)
-                - tokens_collection: Active tokens collection name (default: auth_tokens)
+                - revoked_tokens_collection: Revoked tokens collection (default: revoked_tokens)
                 - token_expiry_hours: Token validity duration (default: 24)
                 - create_indexes: Auto-create indexes on startup (default: True)
                 
@@ -60,7 +60,7 @@ class MongoDBAuthPlugin(AuthenticationPlugin):
         self.connection_string = config.get('connection_string', 'mongodb://localhost:27017')
         self.database_name = config.get('database', 'openmark')
         self.users_collection_name = config.get('users_collection', 'users')
-        self.tokens_collection_name = config.get('tokens_collection', 'auth_tokens')
+        self.revoked_tokens_collection_name = config.get('revoked_tokens_collection', 'revoked_tokens')
         self.token_expiry_hours = config.get('token_expiry_hours', 24)
         self.create_indexes = config.get('create_indexes', True)
         
@@ -68,7 +68,7 @@ class MongoDBAuthPlugin(AuthenticationPlugin):
         self._client = None
         self._db = None
         self._users = None
-        self._tokens = None
+        self._revoked_tokens = None
         
         self._connect()
     
@@ -84,7 +84,7 @@ class MongoDBAuthPlugin(AuthenticationPlugin):
             
             self._db = self._client[self.database_name]
             self._users = self._db[self.users_collection_name]
-            self._tokens = self._db[self.tokens_collection_name]
+            self._revoked_tokens = self._db[self.revoked_tokens_collection_name]
             
             if self.create_indexes:
                 self._setup_indexes()
@@ -102,10 +102,9 @@ class MongoDBAuthPlugin(AuthenticationPlugin):
         self._users.create_index('username', unique=True)
         self._users.create_index('email', sparse=True)
         
-        # Tokens indexes
-        self._tokens.create_index('token', unique=True)
-        self._tokens.create_index('username')
-        self._tokens.create_index('expires_at', expireAfterSeconds=0)  # TTL index
+        # Revoked tokens indexes (for JWT blacklist)
+        self._revoked_tokens.create_index('token_hash', unique=True)
+        self._revoked_tokens.create_index('expires_at', expireAfterSeconds=0)  # TTL index
     
     def _create_default_users(self):
         """Create default admin and user accounts."""
@@ -146,23 +145,41 @@ class MongoDBAuthPlugin(AuthenticationPlugin):
         """
         return hashlib.sha256(password.encode()).hexdigest()
     
-    def _generate_token(self) -> str:
-        """Generate a secure random token.
+    def _hash_token(self, token: str) -> str:
+        """Hash a token for storage in revocation list.
         
+        Args:
+            token: JWT token to hash
+            
         Returns:
-            Random token string
+            Hashed token
         """
-        return secrets.token_urlsafe(32)
+        return hashlib.sha256(token.encode()).hexdigest()
+    
+    def _is_token_revoked(self, token: str) -> bool:
+        """Check if a token has been revoked.
+        
+        Args:
+            token: JWT token to check
+            
+        Returns:
+            True if revoked, False otherwise
+        """
+        try:
+            token_hash = self._hash_token(token)
+            return self._revoked_tokens.find_one({'token_hash': token_hash}) is not None
+        except OperationFailure:
+            return False
     
     def authenticate(self, username: str, password: str) -> Optional[dict]:
-        """Authenticate a user.
+        """Authenticate a user and return a JWT token.
         
         Args:
             username: The username
             password: The password
             
         Returns:
-            Dict with 'token' and 'expires_at' if successful, None otherwise
+            Dict with 'token' (JWT) and 'expires_at' if successful, None otherwise
         """
         try:
             user = self._users.find_one({
@@ -178,67 +195,77 @@ class MongoDBAuthPlugin(AuthenticationPlugin):
             if user['password_hash'] != password_hash:
                 return None
             
-            # Generate token
-            token = self._generate_token()
-            expires_at = datetime.utcnow() + timedelta(hours=self.token_expiry_hours)
+            # Generate JWT token using the global JWT handler
+            jwt_handler = get_jwt_handler()
+            if not jwt_handler:
+                raise RuntimeError("JWT handler not initialized")
             
-            # Store token in MongoDB
-            self._tokens.insert_one({
-                'token': token,
-                'username': username,
-                'role': user.get('role', 'user'),
-                'expires_at': expires_at,
-                'created_at': datetime.utcnow(),
-                'ip_address': None,  # Can be set by caller
-                'user_agent': None   # Can be set by caller
-            })
-            
-            return {
-                'token': token,
-                'expires_at': expires_at.isoformat() + 'Z'
-            }
+            return jwt_handler.generate_auth_token(
+                username=username,
+                role=user.get('role', 'user'),
+                expires_in_hours=self.token_expiry_hours
+            )
             
         except OperationFailure:
             return None
     
     def validate_token(self, token: str) -> Optional[dict]:
-        """Validate an authentication token.
+        """Validate a JWT authentication token.
         
         Args:
-            token: The authentication token
+            token: The JWT authentication token
             
         Returns:
-            User dict if valid, None otherwise
+            User dict with 'username' and 'role' if valid, None otherwise
         """
-        try:
-            token_data = self._tokens.find_one({
-                'token': token,
-                'expires_at': {'$gt': datetime.utcnow()}
-            })
-            
-            if not token_data:
-                return None
-            
-            return {
-                'username': token_data['username'],
-                'role': token_data['role']
-            }
-            
-        except OperationFailure:
+        # Check if token is revoked in MongoDB
+        if self._is_token_revoked(token):
             return None
+        
+        jwt_handler = get_jwt_handler()
+        if not jwt_handler:
+            return None
+        
+        token_data = jwt_handler.validate_auth_token(token)
+        
+        if not token_data:
+            return None
+        
+        return {
+            'username': token_data['username'],
+            'role': token_data['role']
+        }
     
     def invalidate_token(self, token: str) -> bool:
-        """Invalidate an authentication token.
+        """Invalidate a JWT authentication token (revoke it).
+        
+        Stores the token hash in MongoDB for distributed revocation.
         
         Args:
-            token: The authentication token
+            token: The JWT authentication token
             
         Returns:
             True if successful, False otherwise
         """
         try:
-            result = self._tokens.delete_one({'token': token})
-            return result.deleted_count > 0
+            jwt_handler = get_jwt_handler()
+            if not jwt_handler:
+                return False
+            
+            # Get token expiry for TTL
+            expiry = jwt_handler.get_token_expiry(token)
+            if not expiry:
+                return False
+            
+            # Store token hash in revocation list
+            token_hash = self._hash_token(token)
+            self._revoked_tokens.insert_one({
+                'token_hash': token_hash,
+                'expires_at': expiry,  # TTL will auto-delete after expiry
+                'revoked_at': datetime.utcnow()
+            })
+            
+            return True
         except OperationFailure:
             return False
     

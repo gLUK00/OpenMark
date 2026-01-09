@@ -1,17 +1,21 @@
-"""OAuth 2.0 authentication plugin."""
+"""OAuth 2.0 authentication plugin with JWT tokens."""
 
 import secrets
-import hashlib
 import requests
 from datetime import datetime, timedelta
 from typing import Optional
 from urllib.parse import urlencode
 
 from app.plugins.base import AuthenticationPlugin
+from app.jwt_handler import get_jwt_handler
 
 
 class OAuthAuthPlugin(AuthenticationPlugin):
-    """Authentication plugin using OAuth 2.0 providers (Google, GitHub, Microsoft, etc.)."""
+    """Authentication plugin using OAuth 2.0 providers with JWT tokens.
+    
+    Supports Google, GitHub, Microsoft, and custom OAuth providers.
+    Uses stateless JWT tokens for session management after OAuth authentication.
+    """
     
     # Pre-configured OAuth providers
     PROVIDERS = {
@@ -196,24 +200,22 @@ class OAuthAuthPlugin(AuthenticationPlugin):
             if not username:
                 return None
             
-            # Generate OpenMark token
-            openmark_token = secrets.token_urlsafe(32)
-            expires_at = datetime.utcnow() + timedelta(hours=self.token_expiry_hours)
+            # Generate JWT token using the global JWT handler
+            jwt_handler = get_jwt_handler()
+            if not jwt_handler:
+                raise RuntimeError("JWT handler not initialized")
             
-            # Store token
-            self._active_tokens[openmark_token] = {
-                'username': username,
-                'role': self.default_role,
-                'expires_at': expires_at,
-                'oauth_provider': self.provider,
-                'oauth_userinfo': userinfo
-            }
+            result = jwt_handler.generate_auth_token(
+                username=username,
+                role=self.default_role,
+                expires_in_hours=self.token_expiry_hours,
+                extra_claims={
+                    'oauth_provider': self.provider
+                }
+            )
             
-            return {
-                'token': openmark_token,
-                'expires_at': expires_at.isoformat() + 'Z',
-                'username': username
-            }
+            result['username'] = username
+            return result
             
         except requests.RequestException:
             return None
@@ -252,22 +254,21 @@ class OAuthAuthPlugin(AuthenticationPlugin):
         }
     
     def validate_token(self, token: str) -> Optional[dict]:
-        """Validate an authentication token.
+        """Validate a JWT authentication token.
         
         Args:
-            token: The authentication token
+            token: The JWT authentication token
             
         Returns:
-            User dict if valid, None otherwise
+            User dict with 'username' and 'role' if valid, None otherwise
         """
-        token_data = self._active_tokens.get(token)
-        
-        if not token_data:
+        jwt_handler = get_jwt_handler()
+        if not jwt_handler:
             return None
         
-        # Check expiration
-        if datetime.utcnow() > token_data['expires_at']:
-            del self._active_tokens[token]
+        token_data = jwt_handler.validate_auth_token(token)
+        
+        if not token_data:
             return None
         
         return {
@@ -276,15 +277,16 @@ class OAuthAuthPlugin(AuthenticationPlugin):
         }
     
     def invalidate_token(self, token: str) -> bool:
-        """Invalidate an authentication token.
+        """Invalidate a JWT authentication token (revoke it).
         
         Args:
-            token: The authentication token
+            token: The JWT authentication token
             
         Returns:
             True if successful, False otherwise
         """
-        if token in self._active_tokens:
-            del self._active_tokens[token]
-            return True
-        return False
+        jwt_handler = get_jwt_handler()
+        if not jwt_handler:
+            return False
+        
+        return jwt_handler.revoke_token(token)

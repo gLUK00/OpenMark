@@ -179,20 +179,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 
                 if (result && result.success) {
-                    // Use DAT (Document Access Token) if available, fallback to legacy format
-                    let viewUrl;
+                    // Use DAT (Document Access Token) - JWT-based authentication
                     if (result.dat) {
-                        viewUrl = `/api/viewDocument?dat=${result.dat}`;
+                        const viewUrl = `/api/viewDocument?dat=${result.dat}`;
+                        window.location.href = viewUrl;
                     } else {
-                        // Fallback to legacy format
-                        const token = Auth.getToken();
-                        viewUrl = `/api/viewDocument?tempDocumentId=${result.tempDocumentId}&token=${token}`;
-                        if (hideAnnotationsTools) viewUrl += '&hideAnnotationsTools=true';
-                        if (hideAnnotations) viewUrl += '&hideAnnotations=true';
-                        if (hideLogo) viewUrl += '&hideLogo=true';
+                        errorMessage.textContent = 'Server did not return a valid Document Access Token';
+                        errorMessage.style.display = 'block';
                     }
-                    
-                    window.location.href = viewUrl;
                 } else {
                     errorMessage.textContent = result?.error || 'Failed to open document';
                     errorMessage.style.display = 'block';
