@@ -126,12 +126,10 @@
             tempDocumentId: "{{ temp_doc_id }}",
             documentId: "{{ document_id }}",
             {% if dat %}
-            // Document Access Token (DAT) - preferred method
             dat: "{{ dat }}",
             token: null,
             pdfUrl: "/pdf/{{ temp_doc_id }}?dat={{ dat }}",
             {% else %}
-            // Legacy token method
             dat: null,
             token: "{{ token }}",
             pdfUrl: "/pdf/{{ temp_doc_id }}?token={{ token }}",

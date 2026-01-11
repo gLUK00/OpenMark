@@ -21,6 +21,15 @@ user_statistics = {}
 user_history = {}
 
 
+def format_duration(seconds):
+    """Format duration in seconds to human-readable string."""
+    hours = seconds // 3600
+    if hours >= 1:
+        return f"{hours} hour{'s' if hours > 1 else ''}"
+    minutes = seconds // 60
+    return f"{minutes} minute{'s' if minutes > 1 else ''}"
+
+
 def require_auth(f):
     """Decorator to require authentication for API endpoints.
     
@@ -51,7 +60,7 @@ def require_auth(f):
         if auth_header and auth_header.startswith('Bearer '):
             token = auth_header.split(' ')[1]
         
-        # Check query parameter (legacy)
+        # Check query parameter as fallback
         if not token:
             token = request.args.get('token')
         
@@ -217,11 +226,14 @@ def quick_view():
     # Step 5: Build the viewer URL with DAT only (no separate token needed)
     view_path = f"/api/viewDocument?dat={dat}"
     
+    # Calculate human-readable validity
+    valid_for = format_duration(dat_duration)
+    
     return jsonify({
         'success': True,
         'viewUrl': view_path,
-        'dat': dat,  # Document Access Token
-        'tempDocumentId': temp_doc_id,
+        'dat': dat,
+        'validFor': valid_for,
         'expires_at': dat_expires_at.isoformat() + 'Z'
     })
 
@@ -241,9 +253,8 @@ def logout():
 def request_document():
     """Request a PDF document for viewing.
     
-    Returns both the tempDocumentId (for legacy compatibility) and a 
-    Document Access Token (DAT) that can be used to access the viewer
-    without requiring additional authentication validation.
+    Returns a Document Access Token (DAT) that can be used to access 
+    the viewer without requiring additional authentication validation.
     """
     data = request.get_json()
     
@@ -327,8 +338,9 @@ def request_document():
     
     return jsonify({
         'success': True,
-        'tempDocumentId': temp_doc_id,  # Legacy compatibility
-        'dat': dat,  # Document Access Token (recommended)
+        'dat': dat,
+        'viewUrl': f'/api/viewDocument?dat={dat}',
+        'validFor': format_duration(dat_duration),
         'expires_at': dat_expires_at.isoformat() + 'Z'
     })
 
@@ -337,9 +349,9 @@ def request_document():
 def get_document_status(temp_doc_id):
     """Get the download status of a document.
     
-    Supports both authentication methods:
+    Supports authentication via:
     - DAT (Document Access Token) in query parameter
-    - Bearer token in Authorization header (legacy)
+    - Bearer token in Authorization header
     
     Returns status: 'pending', 'downloading', 'ready', 'error', or 'not_found'
     """
@@ -356,7 +368,7 @@ def get_document_status(temp_doc_id):
         if dat_info and dat_info['temp_document_id'] == temp_doc_id:
             username = dat_info['username']
     
-    # Fallback to Bearer token (legacy)
+    # Fallback to Bearer token
     if not username:
         token = None
         auth_header = request.headers.get('Authorization')

@@ -55,14 +55,10 @@ def history_page():
 def view_document():
     """Render the PDF viewer page.
     
-    Supports two authentication methods:
-    1. DAT (Document Access Token) - Recommended, self-contained JWT
-       URL: /api/viewDocument?dat=<jwt_token>
-       
-    2. Legacy (tempDocumentId + token) - For backward compatibility
-       URL: /api/viewDocument?tempDocumentId=<id>&token=<auth_token>
+    Authentication via DAT (Document Access Token):
+    URL: /api/viewDocument?dat=<jwt_token>
     
-    The DAT method is preferred as it:
+    The DAT is a self-contained JWT that:
     - Contains all necessary information in a single token
     - Survives page refresh (F5) without issues
     - Has longer validity (2 hours by default)
@@ -113,7 +109,7 @@ def view_document():
         
         return add_iframe_headers(response)
     
-    # Legacy method: tempDocumentId + token
+    # Fallback: tempDocumentId + token authentication
     temp_doc_id = request.args.get('tempDocumentId')
     token = request.args.get('token')
     hide_annotations_tools = request.args.get('hideAnnotationsTools', 'false').lower() == 'true'
@@ -126,7 +122,7 @@ def view_document():
     
     if not temp_doc_id or not token:
         return render_template('error.html', 
-                               error='Missing document access token (dat) or tempDocumentId/token parameters'), 400
+                               error='Missing document access token (dat) parameter'), 400
     
     # Validate token
     user = plugin_manager.auth_plugin.validate_token(token)

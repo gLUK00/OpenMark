@@ -705,14 +705,14 @@
             "type": "string",
             "description": "Document Access Token"
           },
-          "tempDocumentId": {
-            "type": "string",
-            "description": "Temporary document identifier"
-          },
           "expires_at": {
             "type": "string",
             "format": "date-time",
             "description": "DAT expiration timestamp"
+          },
+          "validFor": {
+            "type": "string",
+            "description": "Human-readable token validity duration"
           }
         }
       },
@@ -748,9 +748,9 @@
             "type": "boolean",
             "example": true
           },
-          "tempDocumentId": {
+          "viewUrl": {
             "type": "string",
-            "description": "Temporary document identifier"
+            "description": "URL to view the document (includes DAT)"
           },
           "dat": {
             "type": "string",
@@ -760,6 +760,10 @@
             "type": "string",
             "format": "date-time",
             "description": "Token expiration timestamp"
+          },
+          "validFor": {
+            "type": "string",
+            "description": "Human-readable token validity duration"
           }
         }
       },

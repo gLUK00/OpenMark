@@ -91,7 +91,7 @@ class PDFViewer {
     
     /**
      * Get authorization headers for API requests.
-     * Supports both DAT (preferred) and legacy token.
+     * Uses DAT when available, otherwise Bearer token.
      */
     getAuthHeaders() {
         if (window.OPENMARK.dat) {
