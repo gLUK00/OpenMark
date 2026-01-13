@@ -2,7 +2,7 @@
 
 Place your custom authentication plugin files here.
 
-## Example
+## Authentication Plugin Example
 
 ```python
 # my_ldap_auth.py
@@ -32,7 +32,85 @@ class MyLDAPAuthPlugin(AuthenticationPlugin):
         pass
 ```
 
-Then configure in config.json:
+---
+
+## User Management Backend Example
+
+Pour que les scripts d'administration (`scripts/user_*.py`) fonctionnent avec votre 
+plugin d'authentification personnalisé, vous devez également créer un backend de 
+gestion des utilisateurs.
+
+```python
+# my_ldap_users.py
+
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from scripts.user_manager import UserManagementBackend
+from typing import Optional, List, Dict, Any
+
+class MyLDAPUserBackend(UserManagementBackend):
+    """Backend de gestion des utilisateurs pour LDAP.
+    
+    Le nom du backend est extrait automatiquement du nom de la classe:
+    MyLDAPUserBackend -> 'myldap'
+    """
+    
+    def __init__(self, config: dict, project_root: str = None):
+        super().__init__(config, project_root)
+        # Initialiser la connexion LDAP
+        self.ldap_url = config.get('ldap_url', 'ldap://localhost:389')
+        self.base_dn = config.get('base_dn', 'dc=example,dc=com')
+        self.admin_dn = config.get('admin_dn')
+        self.admin_password = config.get('admin_password')
+        # ... connexion LDAP
+    
+    def list_users(self) -> List[Dict[str, Any]]:
+        """Liste les utilisateurs LDAP."""
+        # Recherche LDAP pour lister les utilisateurs
+        # return [{'username': 'user1', 'role': 'user'}, ...]
+        pass
+    
+    def get_user(self, username: str) -> Optional[Dict[str, Any]]:
+        """Récupère un utilisateur LDAP."""
+        pass
+    
+    def create_user(self, username: str, password: str, role: str = 'user',
+                    email: str = None) -> bool:
+        """Crée un utilisateur dans LDAP."""
+        # Note: utiliser self.hash_password(password) pour le stockage
+        pass
+    
+    def update_user(self, username: str, new_password: str = None,
+                    new_role: str = None, new_username: str = None,
+                    new_email: str = None) -> bool:
+        """Modifie un utilisateur LDAP."""
+        pass
+    
+    def delete_user(self, username: str) -> bool:
+        """Supprime un utilisateur LDAP."""
+        pass
+    
+    def user_exists(self, username: str) -> bool:
+        """Vérifie si un utilisateur existe dans LDAP."""
+        pass
+    
+    def count_admins(self) -> int:
+        """Compte les administrateurs dans LDAP."""
+        pass
+    
+    def close(self):
+        """Ferme la connexion LDAP."""
+        pass
+```
+
+---
+
+## Configuration
+
+Configurez dans config.json:
+
 ```json
 {
   "plugins": {
@@ -40,11 +118,17 @@ Then configure in config.json:
       "type": "myldap",
       "config": {
         "ldap_url": "ldap://your-ldap-server:389",
-        "base_dn": "dc=yourcompany,dc=com"
+        "base_dn": "dc=yourcompany,dc=com",
+        "admin_dn": "cn=admin,dc=yourcompany,dc=com",
+        "admin_password": "your-admin-password"
       }
     }
   }
 }
 ```
 
-The plugin name is derived from the class name: `MyLDAPAuthPlugin` → `myldap`
+Le nom du plugin/backend est dérivé du nom de la classe:
+- `MyLDAPAuthPlugin` → `myldap` (pour l'authentification)
+- `MyLDAPUserBackend` → `myldap` (pour la gestion des utilisateurs)
+
+Les deux doivent avoir le même nom pour fonctionner ensemble.

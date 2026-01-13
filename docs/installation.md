@@ -56,10 +56,11 @@ This guide covers all installation methods for OpenMark.
    docker run -d -p 5000:5000 -v ./config.json:/app/config.json openmark:latest
    ```
 
-### Using Docker Compose
+### Using Docker Compose (Development)
 
 1. **Run with Docker Compose**
    ```bash
+   cd dev
    docker-compose up -d
    ```
 

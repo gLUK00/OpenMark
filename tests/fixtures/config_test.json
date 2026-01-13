@@ -1,0 +1,33 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080,
+    "debug": false,
+    "secret_key": "test-secret-key-for-testing-only-do-not-use-in-production"
+  },
+  "cache": {
+    "directory": "./cache",
+    "duration_seconds": 3600
+  },
+  "plugins": {
+    "authentication": {
+      "type": "local",
+      "config": {
+        "users_file": "./tests/fixtures/users.json",
+        "token_expiry_hours": 24
+      }
+    },
+    "pdf_source": {
+      "type": "local",
+      "config": {
+        "base_path": "./tests/fixtures/pdfs"
+      }
+    },
+    "annotations": {
+      "type": "local",
+      "config": {
+        "storage_file": "./tests/fixtures/annotations.json"
+      }
+    }
+  }
+}

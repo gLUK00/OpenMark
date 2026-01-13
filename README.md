@@ -22,14 +22,17 @@
 
 ## 📚 Documentation
 
-| Document | Description |
-|----------|-------------|
-| [Architecture](docs/architecture.md) | System architecture, integration flow, and JWT token structure |
-| [Installation](docs/installation.md) | Installation guide for development and production |
-| [Configuration](docs/configuration.md) | Configuration options and examples |
-| [API Reference](docs/api_usage.md) | Complete REST API documentation |
-| [Plugin Development](docs/developing_plugins.md) | Guide for creating custom plugins |
-| [Plugin Configurations](docs/default_plugin_configurations.md) | Configuration for all built-in plugins |
+| Document                                                       | Description                                                    |
+| -------------------------------------------------------------- | -------------------------------------------------------------- |
+| [Architecture](docs/architecture.md)                           | System architecture, integration flow, and JWT token structure |
+| [Installation](docs/installation.md)                           | Installation guide for development and production              |
+| [Configuration](docs/configuration.md)                         | Configuration options and examples                             |
+| [API Reference](docs/api_usage.md)                             | Complete REST API documentation                                |
+| [Plugin Development](docs/developing_plugins.md)               | Guide for creating custom plugins                              |
+| [Plugin Configurations](docs/default_plugin_configurations.md) | Configuration for all built-in plugins                         |
+| [Scripts Administration](docs/scripts_administration.md)       | CLI scripts for user and annotation management                 |
+| [Annotations Import/Export](docs/annotations_import.md)        | Import and export annotations via CLI                          |
+| [Testing](docs/testing.md)                                     | Automated testing guide with pytest                            |
 
 ## 🏗️ Architecture Overview
 
@@ -64,6 +67,7 @@ graph LR
 ```
 
 **Integration Flow:**
+
 1. Your server authenticates with OpenMark and requests document access
 2. OpenMark returns a JWT-based Document Access Token (DAT) and viewer URL
 3. Your server sends the viewer URL to the client application
@@ -90,7 +94,7 @@ docker run -d -p 5000:5000 \
 ### Using Docker Compose
 
 ```yaml
-version: '3.8'
+version: "3.8"
 services:
   openmark:
     image: gluk46546546/openmark:latest
@@ -102,6 +106,7 @@ services:
 ```
 
 ```bash
+cd dev
 docker-compose up -d
 ```
 
@@ -111,32 +116,32 @@ For detailed installation instructions, see [Installation Guide](docs/installati
 
 ### Authentication Plugins
 
-| Plugin | Description |
-|--------|-------------|
-| **Local** | JSON file-based authentication for development and small deployments |
-| **MongoDB** | Scalable authentication with MongoDB for multi-instance deployments |
-| **PostgreSQL** | ACID-compliant authentication with PostgreSQL |
-| **OAuth 2.0** | Integrate with Google, GitHub, Microsoft, or custom OAuth providers |
-| **SAML SSO** | Enterprise Single Sign-On with SAML 2.0 Identity Providers |
+| Plugin         | Description                                                          |
+| -------------- | -------------------------------------------------------------------- |
+| **Local**      | JSON file-based authentication for development and small deployments |
+| **MongoDB**    | Scalable authentication with MongoDB for multi-instance deployments  |
+| **PostgreSQL** | ACID-compliant authentication with PostgreSQL                        |
+| **OAuth 2.0**  | Integrate with Google, GitHub, Microsoft, or custom OAuth providers  |
+| **SAML SSO**   | Enterprise Single Sign-On with SAML 2.0 Identity Providers           |
 
 ### PDF Source Plugins
 
-| Plugin | Description |
-|--------|-------------|
-| **HTTP/HTTPS** | Retrieve PDFs from any HTTP endpoint |
-| **AWS S3** | Retrieve PDFs from S3 buckets (also works with MinIO, LocalStack) |
-| **Local Filesystem** | Retrieve PDFs from local directories or mounted volumes |
-| **WebDAV** | Retrieve PDFs from Nextcloud, ownCloud, or any WebDAV server |
-| **FTP/FTPS** | Retrieve PDFs from FTP servers with optional TLS encryption |
-| **SFTP** | Retrieve PDFs over SSH from any Linux/Unix server |
-| **CMIS** | Retrieve PDFs from ECM systems (Alfresco, Nuxeo, SharePoint, etc.) |
+| Plugin               | Description                                                        |
+| -------------------- | ------------------------------------------------------------------ |
+| **HTTP/HTTPS**       | Retrieve PDFs from any HTTP endpoint                               |
+| **AWS S3**           | Retrieve PDFs from S3 buckets (also works with MinIO, LocalStack)  |
+| **Local Filesystem** | Retrieve PDFs from local directories or mounted volumes            |
+| **WebDAV**           | Retrieve PDFs from Nextcloud, ownCloud, or any WebDAV server       |
+| **FTP/FTPS**         | Retrieve PDFs from FTP servers with optional TLS encryption        |
+| **SFTP**             | Retrieve PDFs over SSH from any Linux/Unix server                  |
+| **CMIS**             | Retrieve PDFs from ECM systems (Alfresco, Nuxeo, SharePoint, etc.) |
 
 ### Annotations Plugins
 
-| Plugin | Description |
-|--------|-------------|
-| **Local** | JSON file storage (development only) |
-| **MongoDB** | Scalable annotation storage with MongoDB |
+| Plugin         | Description                                    |
+| -------------- | ---------------------------------------------- |
+| **Local**      | JSON file storage (development only)           |
+| **MongoDB**    | Scalable annotation storage with MongoDB       |
 | **PostgreSQL** | JSONB-based annotation storage with PostgreSQL |
 
 For plugin configuration details, see [Plugin Configurations](docs/default_plugin_configurations.md).

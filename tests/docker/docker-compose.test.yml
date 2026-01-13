@@ -1,0 +1,117 @@
+# Docker configuration for running OpenMark tests
+version: '3.8'
+
+services:
+  # ============================================
+  # OpenMark Application for Tests
+  # ============================================
+  openmark-test:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    ports:
+      - "8090:8080"
+    volumes:
+      - ../../tests/fixtures:/app/tests/fixtures:ro
+      - ../../tests/fixtures/config_test.json:/app/config.json:ro
+    environment:
+      - FLASK_ENV=testing
+      - PYTHONDONTWRITEBYTECODE=1
+    depends_on:
+      mongodb-test:
+        condition: service_healthy
+      postgres-test:
+        condition: service_healthy
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/docs"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+
+  # ============================================
+  # MongoDB for Tests
+  # ============================================
+  mongodb-test:
+    image: mongo:7
+    container_name: openmark-mongodb-test
+    ports:
+      - "27018:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=openmark_test
+      - MONGO_INITDB_ROOT_USERNAME=test
+      - MONGO_INITDB_ROOT_PASSWORD=testpassword
+    tmpfs:
+      - /data/db  # Use RAM for faster tests
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ============================================
+  # PostgreSQL for Tests
+  # ============================================
+  postgres-test:
+    image: postgres:16-alpine
+    container_name: openmark-postgres-test
+    ports:
+      - "5433:5432"
+    environment:
+      - POSTGRES_USER=test
+      - POSTGRES_PASSWORD=testpassword
+      - POSTGRES_DB=openmark_test
+    tmpfs:
+      - /var/lib/postgresql/data  # Use RAM for faster tests
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d openmark_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ============================================
+  # Test Runner
+  # ============================================
+  test-runner:
+    build:
+      context: ../..
+      dockerfile: tests/docker/Dockerfile.test
+    volumes:
+      - ../..:/app
+      - test-results:/app/test-results
+      - pip-cache:/root/.cache/pip
+    environment:
+      - OPENMARK_TEST_URL=http://openmark-test:8080
+      - MONGODB_TEST_URL=mongodb://test:testpassword@mongodb-test:27017/
+      - POSTGRES_TEST_URL=postgresql://test:testpassword@postgres-test:5432/openmark_test
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      openmark-test:
+        condition: service_healthy
+    networks:
+      - test-network
+    working_dir: /app
+    command: >
+      pytest tests/ 
+        -v 
+        --tb=short
+        --cov=app 
+        --cov-report=html:/app/test-results/coverage 
+        --cov-report=xml:/app/test-results/coverage.xml
+        --junitxml=/app/test-results/junit.xml
+        -m "not slow"
+
+networks:
+  test-network:
+    driver: bridge
+
+volumes:
+  test-results:
+  pip-cache:
